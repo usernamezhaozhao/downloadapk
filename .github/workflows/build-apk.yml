@@ -1,0 +1,77 @@
+name: Build Android APK
+
+# Triggers: push to main, or run manually from the Actions tab.
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Gradle (used by Flutter's Android build) needs a JDK.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Install the Flutter SDK (no local install needed on your machine).
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The GitHub runner has no Android SDK by default; install it and
+      # accept the licenses so `flutter build apk` can run.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Safety nets: disable analytics prompts in CI and accept Android licenses.
+      - name: Disable Flutter analytics
+        run: flutter config --no-analytics
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      # Generate a canonical Flutter project (this creates the correct
+      # Gradle wrapper + native scaffolding, avoiding any hand-written
+      # binary files). The runner has network access.
+      - name: Generate Flutter project scaffold
+        run: flutter create --project-name hello_world_app /tmp/flutter_app
+
+      # Replace the generated placeholder code with our Hello World source.
+      - name: Inject our source code
+        run: |
+          cp lib/main.dart /tmp/flutter_app/lib/main.dart
+          cp test/widget_test.dart /tmp/flutter_app/test/widget_test.dart
+          cp pubspec.yaml /tmp/flutter_app/pubspec.yaml
+
+      - name: Install dependencies
+        working-directory: /tmp/flutter_app
+        run: flutter pub get
+
+      - name: Run tests
+        working-directory: /tmp/flutter_app
+        run: flutter test
+
+      # Build a DEBUG APK: installs and runs on any device/emulator with
+      # "unknown sources" enabled, with no signing setup required.
+      - name: Build debug APK
+        working-directory: /tmp/flutter_app
+        run: flutter build apk --debug
+
+      - name: Copy APK into workspace
+        run: cp /tmp/flutter_app/build/app/outputs/flutter-apk/app-debug.apk ./app-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-world-apk
+          path: ./app-debug.apk

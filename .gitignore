@@ -1,0 +1,25 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+build/
+
+# Android / iOS / desktop build outputs are generated in CI, not committed
+android/
+ios/
+linux/
+macos/
+windows/
+web/
+
+# Editor / OS
+*.iml
+.idea/
+.vscode/
+.DS_Store
+
+# Build artifacts
+app-debug.apk
+*.apk
