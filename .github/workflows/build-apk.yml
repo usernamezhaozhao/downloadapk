@@ -35,48 +35,34 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      # Safety net: disable analytics prompts in CI.
       - name: Disable Flutter analytics
         run: flutter config --no-analytics
 
-      # Belt-and-suspenders license acceptance (v4 already does this, but
-      # harmless and guards against any remaining prompt). Flutter resolves
-      # the SDK location itself, so no PATH issue like raw `sdkmanager`.
       - name: Accept Android SDK licenses
         run: yes | flutter doctor --android-licenses
 
-      # Generate a canonical Flutter project (this creates the correct
-      # Gradle wrapper + native scaffolding, avoiding any hand-written
-      # binary files). The runner has network access.
+      # Generate a canonical Flutter project (correct Gradle wrapper + native
+      # scaffolding) in a temp dir, then copy only the `android/` folder into
+      # the workspace. We keep our own lib/, test/ and pubspec.yaml.
       - name: Generate Flutter project scaffold
-        run: flutter create --project-name hello_world_app /tmp/flutter_app
-
-      # Replace the generated placeholder code with our Hello World source.
-      - name: Inject our source code
         run: |
-          cp lib/main.dart /tmp/flutter_app/lib/main.dart
-          cp test/widget_test.dart /tmp/flutter_app/test/widget_test.dart
-          cp pubspec.yaml /tmp/flutter_app/pubspec.yaml
+          flutter create --project-name hello_world_app /tmp/flutter_app
+          cp -r /tmp/flutter_app/android ./
 
       - name: Install dependencies
-        working-directory: /tmp/flutter_app
         run: flutter pub get
 
       - name: Run tests
-        working-directory: /tmp/flutter_app
         run: flutter test
 
-      # Build a DEBUG APK: installs and runs on any device/emulator with
+      # Debug APK: installs and runs on any device/emulator with
       # "unknown sources" enabled, with no signing setup required.
       - name: Build debug APK
-        working-directory: /tmp/flutter_app
         run: flutter build apk --debug
 
-      - name: Copy APK into workspace
-        run: cp /tmp/flutter_app/build/app/outputs/flutter-apk/app-debug.apk ./app-debug.apk
-
+      # Upload the built APK so it can be downloaded from the Actions page.
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hello-world-apk
-          path: ./app-debug.apk
+          name: app-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
