@@ -86,10 +86,12 @@ def patch_build_gradle() -> None:
     that require desugaring to be enabled, otherwise Gradle fails with:
       "Dependency ':flutter_local_notifications' requires core library
        desugaring to be enabled for :app."
+    If the dependency is missing you get:
+      "coreLibraryDesugaring configuration contains no dependencies."
 
     Handles BOTH Gradle dialects Flutter may emit:
-      - Groovy DSL   -> android/app/build.gradle        (flag: coreLibraryDesugaringEnabled true)
-      - Kotlin DSL   -> android/app/build.gradle.kts     (flag: isCoreLibraryDesugaringEnabled = true)
+      - Groovy DSL   -> android/app/build.gradle      (flag: coreLibraryDesugaringEnabled = true)
+      - Kotlin DSL   -> android/app/build.gradle.kts   (flag: isCoreLibraryDesugaringEnabled = true)
     The dependency string is identical in both dialects.
     """
     DESUGAR_DEP = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")'
@@ -103,20 +105,41 @@ def patch_build_gradle() -> None:
             continue
         with open(gradle, "r", encoding="utf-8") as f:
             content = f.read()
+        modified = False
 
+        # 1) Enable the desugaring flag inside compileOptions (if not already).
         if "coreLibraryDesugaring" not in content:
-            content = re.sub(
+            content, n = re.subn(
                 r"(compileOptions\s*\{)",
                 r"\1\n        " + flag,
                 content,
                 count=1,
             )
-            content = re.sub(
+            if n:
+                modified = True
+
+        # 2) Add the desugar_jdk_libs dependency.
+        #    Try to insert into an existing `dependencies {` block; if the
+        #    generated template uses an unexpected layout and the regex misses,
+        #    fall back to appending a standalone `dependencies { }` block so the
+        #    dependency is guaranteed to be present (Gradle allows multiple
+        #    dependencies blocks).
+        if "coreLibraryDesugaring(" not in content:
+            newc, n = re.subn(
                 r"(dependencies\s*\{)",
                 r"\1\n    " + DESUGAR_DEP,
                 content,
                 count=1,
             )
+            if n == 0:
+                if not content.endswith("\n"):
+                    content += "\n"
+                newc = content + "dependencies {\n    " + DESUGAR_DEP + "\n}\n"
+                print("WARN: no 'dependencies {' found in %s; appended one" % gradle)
+            content = newc
+            modified = True
+
+        if modified:
             with open(gradle, "w", encoding="utf-8") as f:
                 f.write(content)
             patched.append(gradle)
