@@ -28,18 +28,20 @@ jobs:
           channel: stable
           cache: true
 
-      # The GitHub runner has no Android SDK by default; install it and
-      # accept the licenses so `flutter build apk` can run.
+      # The GitHub runner has no Android SDK by default. Use @v4 (NOT @v3):
+      # v3's default packages include the deprecated `tools` package that
+      # Google removed, so it fails with "Failed to find package 'tools'".
+      # v4 defaults to `platform-tools` and auto-accepts licenses.
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      # Safety nets: disable analytics prompts in CI and accept Android licenses.
-      # NOTE: use `flutter doctor --android-licenses` (not raw `sdkmanager`),
-      # because setup-android does not put sdkmanager on PATH. Flutter resolves
-      # the SDK location itself and can auto-accept every license this way.
+      # Safety net: disable analytics prompts in CI.
       - name: Disable Flutter analytics
         run: flutter config --no-analytics
 
+      # Belt-and-suspenders license acceptance (v4 already does this, but
+      # harmless and guards against any remaining prompt). Flutter resolves
+      # the SDK location itself, so no PATH issue like raw `sdkmanager`.
       - name: Accept Android SDK licenses
         run: yes | flutter doctor --android-licenses
 
