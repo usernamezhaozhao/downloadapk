@@ -79,6 +79,43 @@ def patch_manifest() -> None:
         f.write(content)
 
 
+def patch_build_gradle() -> None:
+    """Enable core library desugaring.
+
+    flutter_local_notifications (and other modern plugins) use Java 8+ APIs
+    that require desugaring to be enabled, otherwise Gradle fails with:
+      "Dependency ':flutter_local_notifications' requires core library
+       desugaring to be enabled for :app."
+    """
+    gradle = "android/app/build.gradle"
+    if not os.path.exists(gradle):
+        print("WARN: android/app/build.gradle not found, skip desugaring patch")
+        return
+    with open(gradle, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 1) Enable desugaring in compileOptions
+    if "coreLibraryDesugaringEnabled" not in content:
+        content = re.sub(
+            r"(compileOptions\s*\{)",
+            r'\1\n        coreLibraryDesugaringEnabled = true',
+            content,
+            count=1,
+        )
+
+    # 2) Add the desugar_jdk_libs dependency
+    if "desugar_jdk_libs" not in content:
+        content = re.sub(
+            r"(dependencies\s*\{)",
+            r'\1\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")',
+            content,
+            count=1,
+        )
+
+    with open(gradle, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
 def write_file_paths() -> None:
     os.makedirs(RES_XML_DIR, exist_ok=True)
     xml = """<?xml version="1.0" encoding="utf-8"?>
@@ -94,5 +131,6 @@ def write_file_paths() -> None:
 
 if __name__ == "__main__":
     patch_manifest()
+    patch_build_gradle()
     write_file_paths()
-    print("patched: permissions + usesCleartextTraffic + FileProvider + queries")
+    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring")
