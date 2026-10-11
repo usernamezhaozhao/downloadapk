@@ -86,34 +86,45 @@ def patch_build_gradle() -> None:
     that require desugaring to be enabled, otherwise Gradle fails with:
       "Dependency ':flutter_local_notifications' requires core library
        desugaring to be enabled for :app."
+
+    Handles BOTH Gradle dialects Flutter may emit:
+      - Groovy DSL   -> android/app/build.gradle        (flag: coreLibraryDesugaringEnabled true)
+      - Kotlin DSL   -> android/app/build.gradle.kts     (flag: isCoreLibraryDesugaringEnabled = true)
+    The dependency string is identical in both dialects.
     """
-    gradle = "android/app/build.gradle"
-    if not os.path.exists(gradle):
-        print("WARN: android/app/build.gradle not found, skip desugaring patch")
-        return
-    with open(gradle, "r", encoding="utf-8") as f:
-        content = f.read()
+    DESUGAR_DEP = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")'
+    configs = {
+        "android/app/build.gradle": "coreLibraryDesugaringEnabled = true",
+        "android/app/build.gradle.kts": "isCoreLibraryDesugaringEnabled = true",
+    }
+    patched = []
+    for gradle, flag in configs.items():
+        if not os.path.exists(gradle):
+            continue
+        with open(gradle, "r", encoding="utf-8") as f:
+            content = f.read()
 
-    # 1) Enable desugaring in compileOptions
-    if "coreLibraryDesugaringEnabled" not in content:
-        content = re.sub(
-            r"(compileOptions\s*\{)",
-            r'\1\n        coreLibraryDesugaringEnabled = true',
-            content,
-            count=1,
-        )
+        if "coreLibraryDesugaring" not in content:
+            content = re.sub(
+                r"(compileOptions\s*\{)",
+                r"\1\n        " + flag,
+                content,
+                count=1,
+            )
+            content = re.sub(
+                r"(dependencies\s*\{)",
+                r"\1\n    " + DESUGAR_DEP,
+                content,
+                count=1,
+            )
+            with open(gradle, "w", encoding="utf-8") as f:
+                f.write(content)
+            patched.append(gradle)
 
-    # 2) Add the desugar_jdk_libs dependency
-    if "desugar_jdk_libs" not in content:
-        content = re.sub(
-            r"(dependencies\s*\{)",
-            r'\1\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")',
-            content,
-            count=1,
-        )
-
-    with open(gradle, "w", encoding="utf-8") as f:
-        f.write(content)
+    if patched:
+        print("patched desugaring into: " + ", ".join(patched))
+    else:
+        print("WARN: no android/app/build.gradle(.kts) found; desugaring NOT patched")
 
 
 def write_file_paths() -> None:
