@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'permission_test_page.dart';
 
 void main() => runApp(const MyApp());
 
@@ -8,17 +9,51 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Hello World',
+      title: '抖音下载器',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Hello World')),
-        body: const Center(
-          child: Text(
-            'Hello World',
-            style: TextStyle(fontSize: 32, fontWeight: FontWeight.w600),
-          ),
-        ),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.green),
+      home: const HomeTabs(),
+    );
+  }
+}
+
+class HomeTabs extends StatefulWidget {
+  const HomeTabs({super.key});
+
+  @override
+  State<HomeTabs> createState() => _HomeTabsState();
+}
+
+class _HomeTabsState extends State<HomeTabs> {
+  int _idx = 0;
+  final List<Widget> _pages = const [HomePage(), PermissionTestPage()];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('抖音下载器')),
+      body: _pages[_idx],
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _idx,
+        onDestinationSelected: (i) => setState(() => _idx = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home), label: '首页'),
+          NavigationDestination(icon: Icon(Icons.verified_user), label: '测试'),
+        ],
+      ),
+    );
+  }
+}
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Text(
+        'Hello World',
+        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w600),
       ),
     );
   }

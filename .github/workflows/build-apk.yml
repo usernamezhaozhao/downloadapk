@@ -49,6 +49,11 @@ jobs:
           flutter create --project-name hello_world_app /tmp/flutter_app
           cp -r /tmp/flutter_app/android ./
 
+      # Inject our permissions + cleartext + FileProvider + queries into the
+      # generated manifest (so the permission self-check page actually works).
+      - name: Patch Android manifest
+        run: python3 scripts/patch_android.py
+
       - name: Install dependencies
         run: flutter pub get
 
