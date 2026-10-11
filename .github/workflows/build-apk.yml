@@ -34,11 +34,14 @@ jobs:
         uses: android-actions/setup-android@v3
 
       # Safety nets: disable analytics prompts in CI and accept Android licenses.
+      # NOTE: use `flutter doctor --android-licenses` (not raw `sdkmanager`),
+      # because setup-android does not put sdkmanager on PATH. Flutter resolves
+      # the SDK location itself and can auto-accept every license this way.
       - name: Disable Flutter analytics
         run: flutter config --no-analytics
 
       - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
+        run: yes | flutter doctor --android-licenses
 
       # Generate a canonical Flutter project (this creates the correct
       # Gradle wrapper + native scaffolding, avoiding any hand-written
