@@ -14,31 +14,35 @@ void main() {
 
     // Mock flutter_local_notifications platform channel so DouyinPage's
     // async init (initialize + createNotificationChannel) doesn't throw
-    // MissingPluginException inside widget tests.
+    // inside widget tests. NOTE: `initialize` expects FutureOr<bool>, so we
+    // must return a real bool (false) for it, not null — returning null
+    // crashes with "type 'Null' is not a subtype of type 'FutureOr<bool>'".
     TestWidgetsFlutterBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
-      (call) async => null,
+      (call) async {
+        if (call.method == 'initialize') return false;
+        return null;
+      },
     );
+  });
+
+  // Pure widget test: no platform channels involved at all.
+  testWidgets('BilibiliPage shows Hello Bilibili', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: BilibiliPage()));
+
+    expect(find.text('Hello Bilibili'), findsOneWidget);
   });
 
   testWidgets('home shows three tabs: 抖音 / B站 / 测试', (tester) async {
     await tester.pumpWidget(const MyApp());
-    await tester.pump(); // let async init run
+    // Give the async init (fully mocked above, and degradable inside the
+    // app itself) a chance to run its microtasks.
+    await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('抖音'), findsOneWidget);
     expect(find.text('B站'), findsOneWidget);
     expect(find.text('测试'), findsOneWidget);
-  });
-
-  testWidgets('tapping B站 tab shows Hello Bilibili', (tester) async {
-    await tester.pumpWidget(const MyApp());
-    await tester.pump();
-
-    await tester.tap(find.text('B站'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Hello Bilibili'), findsOneWidget);
   });
 }

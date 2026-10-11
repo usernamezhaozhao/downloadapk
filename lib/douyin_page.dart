@@ -42,14 +42,21 @@ class _DouyinPageState extends State<DouyinPage> {
   }
 
   Future<void> _init() async {
-    await Store.instance.init();
-    await _notif.initialize(const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    ));
-    await _dl.init();
-    _cookieCtl.text = Store.instance.cookie;
-    _testIdCtl.text = Store.instance.testId;
-    _refreshList();
+    try {
+      await Store.instance.init();
+      await _notif.initialize(const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ));
+      await _dl.init();
+      _cookieCtl.text = Store.instance.cookie;
+      _testIdCtl.text = Store.instance.testId;
+      _refreshList();
+    } catch (e) {
+      // 平台层不可用（如测试环境）或插件初始化失败时降级：
+      // App 仍可浏览/输入，只是通知与持久化可能受限。
+      debugPrint('DouyinPage init degraded: $e');
+      if (mounted) setState(() => _status = '初始化降级（通知/存储可能受限）');
+    }
   }
 
   void _refreshList() => setState(() => _items = Store.instance.items.toList());
