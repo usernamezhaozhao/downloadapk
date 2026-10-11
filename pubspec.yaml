@@ -18,7 +18,8 @@ dependencies:
   # 发送测试通知
   flutter_local_notifications: ^17.2.0
   # 调用系统播放器（依赖 FileProvider）
-  open_filex: ^5.6.0
+  # 注意：pub.dev 上 open_filex 不存在 5.6.0，最新可用主版本为 4.x
+  open_filex: ^4.7.0
 
 dev_dependencies:
   flutter_test:
