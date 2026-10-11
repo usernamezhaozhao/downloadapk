@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'bilibili_page.dart';
+import 'douyin_page.dart';
 import 'permission_test_page.dart';
 
 void main() => runApp(const MyApp());
@@ -26,7 +28,11 @@ class HomeTabs extends StatefulWidget {
 
 class _HomeTabsState extends State<HomeTabs> {
   int _idx = 0;
-  final List<Widget> _pages = const [HomePage(), PermissionTestPage()];
+  final List<Widget> _pages = const [
+    DouyinPage(),
+    BilibiliPage(),
+    PermissionTestPage(),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -37,23 +43,12 @@ class _HomeTabsState extends State<HomeTabs> {
         selectedIndex: _idx,
         onDestinationSelected: (i) => setState(() => _idx = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.home), label: '首页'),
-          NavigationDestination(icon: Icon(Icons.verified_user), label: '测试'),
+          NavigationDestination(
+              icon: Icon(Icons.download_for_offline), label: '抖音'),
+          NavigationDestination(icon: Icon(Icons.tv), label: 'B站'),
+          NavigationDestination(
+              icon: Icon(Icons.verified_user), label: '测试'),
         ],
-      ),
-    );
-  }
-}
-
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'Hello World',
-        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w600),
       ),
     );
   }

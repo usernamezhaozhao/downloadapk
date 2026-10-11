@@ -33,6 +33,7 @@ def patch_manifest() -> None:
         content = f.read()
 
     # 1) 给 <application> 加 usesCleartextTraffic（后端是 HTTP 明文）
+    #    以及 requestLegacyExternalStorage（gal 插件在 API 29 存相册需要）
     if "usesCleartextTraffic" not in content:
         content = re.sub(
             r"(<application\b[^>]*?)>",
@@ -40,12 +41,26 @@ def patch_manifest() -> None:
             content,
             count=1,
         )
+    if "requestLegacyExternalStorage" not in content:
+        content = re.sub(
+            r"(<application\b[^>]*?)>",
+            r'\1 android:requestLegacyExternalStorage="true">',
+            content,
+            count=1,
+        )
 
     # 2) 注入 <uses-permission>（在 </manifest> 前）
+    #    WRITE_EXTERNAL_STORAGE 需带 maxSdkVersion=29（gal 要求，API>29 走 MediaStore 不需要）
     if "android.permission.POST_NOTIFICATIONS" not in content:
-        block = "\n".join(
-            f'    <uses-permission android:name="{p}"/>' for p in PERMISSIONS
-        )
+        lines = []
+        for p in PERMISSIONS:
+            if p == "android.permission.WRITE_EXTERNAL_STORAGE":
+                lines.append(
+                    '    <uses-permission android:name="%s" android:maxSdkVersion="29"/>' % p
+                )
+            else:
+                lines.append('    <uses-permission android:name="%s"/>' % p)
+        block = "\n".join(lines)
         content = content.replace("</manifest>", block + "\n</manifest>", 1)
 
     # 3) 注入 FileProvider（open_filex 调系统播放器必须）

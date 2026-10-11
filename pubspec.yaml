@@ -1,5 +1,5 @@
 name: hello_world_app
-description: 抖音下载器 — 首页 Hello World + 权限自检中心（测试页）
+description: 抖音下载器 — 抖音下载 / B站占位 / 权限自检（三 Tab）
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -11,15 +11,21 @@ dependencies:
     sdk: flutter
   # 权限状态读取 / 运行时申请
   permission_handler: ^11.3.0
-  # 后端健康自检（HTTP 明文）
+  # 后端通信（HTTP 明文）
   http: ^1.2.0
   # 存储路径
   path_provider: ^2.1.0
-  # 发送测试通知
+  # 发送下载进度 / 结果通知
   flutter_local_notifications: ^17.2.0
   # 调用系统播放器（依赖 FileProvider）
   # 注意：pub.dev 上 open_filex 不存在 5.6.0，最新可用主版本为 4.x
   open_filex: ^4.7.0
+  # 把视频/图片写入系统相册（MediaStore，安卓 10+ 免存储权限）
+  gal: ^2.3.3
+  # 持久化 cookie / 测试作品ID / 下载列表索引
+  shared_preferences: ^2.5.6
+  # 文件名处理
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
