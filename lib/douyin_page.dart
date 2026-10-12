@@ -4,6 +4,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:gal/gal.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:video_player/video_player.dart';
 
 import 'api_client.dart';
 import 'download_service.dart';
@@ -18,6 +19,66 @@ class DouyinPage extends StatefulWidget {
 
   @override
   State<DouyinPage> createState() => _DouyinPageState();
+}
+
+/// App 内嵌视频播放器：用于预览弹窗里直接播放，无需跳出系统播放器。
+class _VideoPreview extends StatefulWidget {
+  final String path;
+  const _VideoPreview(this.path);
+
+  @override
+  State<_VideoPreview> createState() => _VideoPreviewState();
+}
+
+class _VideoPreviewState extends State<_VideoPreview> {
+  late final VideoPlayerController _c;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = VideoPlayerController.file(File(widget.path))
+      ..initialize().then((_) {
+        if (mounted) setState(() => _ready = true);
+      }).catchError((e) {
+        if (mounted) setState(() => _ready = false);
+      });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const SizedBox(
+        height: 200,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return AspectRatio(
+      aspectRatio: _c.value.aspectRatio,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          VideoPlayer(_c),
+          IconButton(
+            iconSize: 56,
+            color: Colors.white,
+            icon: Icon(_c.value.isPlaying
+                ? Icons.pause_circle_filled
+                : Icons.play_circle_fill),
+            onPressed: () => setState(() {
+              _c.value.isPlaying ? _c.pause() : _c.play();
+            }),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DouyinPageState extends State<DouyinPage> {
@@ -266,7 +327,7 @@ class _DouyinPageState extends State<DouyinPage> {
               if (item.type == 'image')
                 ...item.paths.map((p) => Image.file(File(p))).toList()
               else
-                const Center(child: Icon(Icons.play_circle_fill, size: 64)),
+                _VideoPreview(item.paths.first),
             ],
           ),
         ),

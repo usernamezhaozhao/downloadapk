@@ -20,6 +20,8 @@ dependencies:
   # 调用系统播放器（依赖 FileProvider）
   # 注意：pub.dev 上 open_filex 不存在 5.6.0，最新可用主版本为 4.x
   open_filex: ^4.7.0
+  # App 内嵌视频播放（预览弹窗里直接播放，无需跳出系统播放器）
+  video_player: ^2.8.0
   # 把视频/图片写入系统相册（MediaStore，安卓 10+ 免存储权限）
   gal: ^2.3.3
   # 持久化 cookie / 测试作品ID / 下载列表索引
