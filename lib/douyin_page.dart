@@ -40,8 +40,10 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   String? _coverUrl; // 解析出的远程封面（预览用）
   List<String> _debugLogs = [];
 
-  // 剪贴板监听：上次已提示过的链接（避免重复打扰）
+  // 剪贴板监听：上次已提示过的链接 + 时间（短时间内重复触发才忽略，
+  // 隔几秒再复制同一条仍会重新提示，对标抖音「每次复制都问」的体验）
   String? _lastClipboardLink;
+  DateTime? _lastClipboardAt;
 
   void _addDebug(String s) =>
       setState(() => _debugLogs.insert(0, '${DateTime.now().toLocal().toIso8601String().substring(11, 19)}  $s'));
@@ -92,8 +94,15 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       final m = _douyinLink.firstMatch(text);
       if (m == null) return;
       final link = m.group(0)!;
-      if (link == _lastClipboardLink) return;
+      // 仅「同一条链接且 4 秒内重复」才跳过，避免单次返回连发；
+      // 隔几秒再复制同一条（或复制新链接）都会重新提示。
+      if (link == _lastClipboardLink &&
+          _lastClipboardAt != null &&
+          DateTime.now().difference(_lastClipboardAt!).inSeconds < 4) {
+        return;
+      }
       _lastClipboardLink = link;
+      _lastClipboardAt = DateTime.now();
       if (!mounted) return;
       // 系统级 heads-up 横幅：返回前台时尝试从屏幕顶部悬浮弹出。
       // 注意：App 在前台时部分厂商（小米/华为）会把 heads-up 收进状态栏不弹，
