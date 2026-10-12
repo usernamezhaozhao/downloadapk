@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'api_client.dart';
+import 'clipboard_task.dart';
 import 'download_service.dart';
 import 'models.dart';
 import 'notif_service.dart';
@@ -138,6 +140,8 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       await _dl.init();
       _cookieCtl.text = Store.instance.cookie;
       _clipboardMonitor = Store.instance.clipboardMonitor;
+      // 开关默认开 → 启动前台服务常驻监听（关则停止）
+      if (_clipboardMonitor) await _applyMonitorService(true);
       // 测试链接优先用已保存的；为空则填你指定的固定测试链接（懒人一键测）
       _testIdCtl.text = Store.instance.testId.isNotEmpty
           ? Store.instance.testId
@@ -147,6 +151,33 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       // App 仍可浏览/输入，只是通知与持久化可能受限。
       debugPrint('DouyinPage init degraded: $e');
       if (mounted) setState(() => _status = '初始化降级（通知/存储可能受限）');
+    }
+  }
+
+  /// 开关联动：开 → 启动前台服务（状态栏常驻低优先级通知）；关 → 停止服务
+  Future<void> _applyMonitorService(bool on) async {
+    try {
+      if (on) {
+        // 安卓 13+ 启动前台服务必须先有通知权限
+        await _ensureNotifPerm();
+        final running = await FlutterForegroundTask.isRunningService;
+        if (running != true) {
+          await FlutterForegroundTask.startService(
+            callback: clipboardTaskStartCallback,
+            serviceId: 256,
+            notificationTitle: '抖音下载器 · 剪贴板监听中',
+            notificationText: '复制抖音链接即可自动弹下载横幅',
+            notificationIcon: const NotificationIconData(
+              resType: ResourceType.mipmap,
+              resName: 'ic_launcher',
+            ),
+          );
+        }
+      } else {
+        await FlutterForegroundTask.stopService();
+      }
+    } catch (_) {
+      // 服务启动失败（如权限/厂商限制）静默降级，仍可用「回到前台」检测
     }
   }
 
@@ -411,6 +442,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
                           final val = v ?? true;
                           setState(() => _clipboardMonitor = val);
                           await Store.instance.setClipboardMonitor(val);
+                          await _applyMonitorService(val);
                         },
                 ),
                 if (_coverUrl != null)

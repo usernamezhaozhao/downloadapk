@@ -28,6 +28,8 @@ dependencies:
   shared_preferences: ^2.5.6
   # 文件名处理
   path: ^1.9.0
+  # 前台服务：常驻后台轮询剪贴板，复制抖音链接即时弹横幅（比「回到前台才检测」更实时）
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:

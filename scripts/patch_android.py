@@ -79,6 +79,14 @@ def patch_manifest() -> None:
         </provider>"""
         content = content.replace("</application>", provider + "\n    </application>", 1)
 
+    # 3.5) 注入前台服务（flutter_foreground_task 常驻监听剪贴板）
+    if "flutter_foreground_task" not in content:
+        fg = """        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />"""
+        content = content.replace("</application>", fg + "\n    </application>", 1)
+
     # 4) 注入 <queries>（Android 11+ 让系统能找到视频/图片播放器）
     if "<queries>" not in content:
         queries = """    <queries>

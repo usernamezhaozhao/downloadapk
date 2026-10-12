@@ -1,12 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'douyin_page.dart';
 import 'home_page.dart';
 import 'notif_service.dart';
 import 'permission_test_page.dart';
 
-void main() => runApp(const MyApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // v11：先初始化主↔服务通信端口
+  FlutterForegroundTask.initCommunicationPort();
+  // 前台服务引擎初始化（常驻监听剪贴板用；状态栏会有一条低优先级常驻通知）
+  FlutterForegroundTask.init(
+    androidNotificationOptions: const AndroidNotificationOptions(
+      channelId: 'clipboard_channel',
+      channelName: '剪贴板监听',
+      channelDescription: '后台监听抖音分享链接，复制后自动弹下载横幅',
+      onlyAlertOnce: true,
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(),
+    foregroundTaskOptions: const ForegroundTaskOptions(
+      eventAction: ForegroundTaskEventAction.repeat(2000),
+      autoRunOnBoot: false,
+      autoRunOnMyPackageReplaced: false,
+    ),
+  );
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -76,6 +97,15 @@ class _HomeTabsState extends State<HomeTabs> {
       } catch (_) {}
     });
     onNotifTap = _handlePayload;
+    // 前台服务检测到抖音链接 → 主 Isolate 弹系统 heads-up（点了才下载）
+    FlutterForegroundTask.addTaskDataCallback(_onClipboardLink);
+  }
+
+  /// 前台服务把检测到的抖音链接发回来，这里弹系统横幅（与通知点击同款体验）
+  void _onClipboardLink(dynamic data) {
+    if (data is! String || data.isEmpty || !mounted) return;
+    showHeadsUp('检测到抖音链接', '识别到相关内容，点击立即下载',
+        payload: 'clip:$data');
   }
 
   /// 统一分发通知点击：'clip:<链接>' → 抖音页自动下载；其余 → 首页预览
