@@ -12,6 +12,11 @@ import 'permission_test_page.dart';
 /// 经此通道回传到 Dart（照 CSDN 文章架构：用透明 Activity 合法绕开后台读剪贴板限制）。
 const MethodChannel _clipboardProxyChannel = MethodChannel('clipboard_proxy');
 
+/// 主引擎上的原生控制通道：主 Isolate 用它请求启动透明剪贴板代理 Activity。
+/// 该 handler 注册在 MainActivity 的「主引擎」上；后台 isolate 直接调会收不到，
+/// 故通知按钮事件经 sendDataToMain 回到主 Isolate 再调，才能命中原生 handler。
+const MethodChannel _nativeControl = MethodChannel('native_control');
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // v11：先初始化主↔服务通信端口
@@ -119,10 +124,23 @@ class _HomeTabsState extends State<HomeTabs> {
   /// 就知道即将下的是什么（点了才真正开始下载，不会自动下）。
   void _onClipboardLink(dynamic data) {
     if (data is! String || data.isEmpty || !mounted) return;
+    // 通知按钮「读取剪贴板」指令：经主引擎上的 native_control 启动透明代理 Activity，
+    // 由它在真正获得焦点后读剪贴板，再经 clipboard_proxy 通道回传真实链接。
+    if (data == 'read_clipboard') {
+      _startClipboardProxy();
+      return;
+    }
     showLinkHeadsUp(data);
     fetchDouyinTitle(data).then((t) {
       if (t != null && mounted) showLinkHeadsUp(data, title: t);
     });
+  }
+
+  /// 经主引擎上的 native_control 启动透明剪贴板代理 Activity。
+  void _startClipboardProxy() {
+    _nativeControl
+        .invokeMethod<void>('startClipboardProxy')
+        .catchError((_) {});
   }
 
   /// 统一分发通知点击：'clip:<链接>' → 抖音页自动下载；其余 → 首页预览

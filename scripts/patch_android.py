@@ -252,13 +252,7 @@ def patch_min_sdk() -> None:
                 f.write(content)
 
 
-if __name__ == "__main__":
-    patch_manifest()
-    patch_build_gradle()
-    patch_min_sdk()
-    write_file_paths()
-    patch_kotlin()
-    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + shizuku provider + minSdk24 + clipboard proxy activity")
+# NOTE: __main__ 入口已移到文件末尾（在 patch_kotlin 定义之后）执行，避免 NameError。
 
 
 # 透明剪贴板代理 Activity 模板（__PKG__ 会被替换为真实包名）
@@ -403,3 +397,12 @@ def patch_kotlin() -> None:
         print("wrote ClipboardProxyActivity.kt")
     else:
         print("ClipboardProxyActivity.kt already exists, skip")
+
+
+if __name__ == "__main__":
+    patch_manifest()
+    patch_build_gradle()
+    patch_min_sdk()
+    write_file_paths()
+    patch_kotlin()
+    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + shizuku provider + minSdk24 + clipboard proxy activity")

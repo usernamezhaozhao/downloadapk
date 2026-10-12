@@ -64,16 +64,11 @@ class ClipboardTaskHandler extends TaskHandler {
   /// native_control 通道启动透明 Activity；若通道不可用则兜底把 App 拉前台。
   @override
   void onNotificationButtonPressed(String id) {
-    if (id == 'read_clipboard') _launchProxy();
-  }
-
-  Future<void> _launchProxy() async {
-    try {
-      await const MethodChannel('native_control')
-          .invokeMethod<void>('startClipboardProxy');
-    } catch (_) {
-      // 兜底：把 App 拉到前台，走回前台检测路径
-      FlutterForegroundTask.launchApp();
+    if (id == 'read_clipboard') {
+      // 经 sendDataToMain 让主 Isolate 去启动透明代理 Activity。
+      // 注意：native_control 的 handler 注册在主引擎上，后台 isolate 直接调
+      // MethodChannel 会收不到；由主 Isolate 调才能命中原生 handler。
+      FlutterForegroundTask.sendDataToMain('read_clipboard');
     }
   }
 }
