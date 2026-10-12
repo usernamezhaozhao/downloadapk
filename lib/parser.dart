@@ -119,44 +119,66 @@ List<String> _deepUrlsByKey(Map node, List<String> keys) {
   return out;
 }
 
+/// 取一个 http 字符串 URL；兼容「字符串 / 列表 / 嵌套 map」三种形态
+String? _asUrl(dynamic v) {
+  if (v is String && v.startsWith('http')) return v;
+  if (v is List) {
+    for (final e in v) {
+      if (e is String && e.startsWith('http')) return e;
+      if (e is Map) {
+        final u = _urlFromMap(e);
+        if (u != null) return u;
+      }
+    }
+  }
+  if (v is Map) return _urlFromMap(v);
+  return null;
+}
+
+/// 深度搜索图片 CDN 链接（douyinpic / douyinstatic / 图片扩展名）
+List<String> _deepImageUrls(dynamic node) {
+  final out = <String>[];
+  void walk(dynamic n) {
+    if (n is String) {
+      final s = n.toLowerCase();
+      if (s.startsWith('http') &&
+          (n.contains('douyinpic') ||
+              n.contains('douyinstatic') ||
+              s.endsWith('.jpg') ||
+              s.endsWith('.png') ||
+              s.endsWith('.webp'))) {
+        out.add(n);
+      }
+    } else if (n is List) {
+      for (final e in n) walk(e);
+    } else if (n is Map) {
+      for (final e in n.values) walk(e);
+    }
+  }
+
+  walk(node);
+  return out;
+}
+
 ParsedDetail parseDetail(Map<String, dynamic> data, String detailId) {
   // 标题
   final rawTitle =
       data['desc'] ?? data['title'] ?? data['aweme_title'] ?? data['aweme_desc'];
   final title = sanitize((rawTitle ?? '抖音_$detailId').toString());
 
-  // 图文（图片列表）
-  final imgUrls = <String>[];
-  for (final key in [
-    'img_list',
-    'images',
-    'image_list',
-    'imgUrls',
-    'img_urls',
-    'image_urls'
-  ]) {
-    imgUrls.addAll(_collectUrls(data[key]));
-  }
-  if (imgUrls.isEmpty) imgUrls.addAll(_deepUrlsByKey(data, ['img']));
-
-  // 视频直链
-  String? videoUrl;
-  for (final key in [
-    'video_url',
-    'video_play_url',
-    'video_play_addr',
-    'play_addr',
-    'play_url',
-    'videoUrl',
-    'url'
-  ]) {
-    final v = data[key];
-    if (v is String && v.startsWith('http')) {
-      videoUrl = v;
-      break;
-    }
-    if (v is Map) {
-      final u = _urlFromMap(v);
+  // 视频直链：DouK-Downloader 真实字段是 downloads（也可能是列表/嵌套）
+  String? videoUrl = _asUrl(data['downloads']);
+  if (videoUrl == null) {
+    for (final key in [
+      'video_url',
+      'video_play_url',
+      'video_play_addr',
+      'play_addr',
+      'play_url',
+      'videoUrl',
+      'url'
+    ]) {
+      final u = _asUrl(data[key]);
       if (u != null) {
         videoUrl = u;
         break;
@@ -164,18 +186,44 @@ ParsedDetail parseDetail(Map<String, dynamic> data, String detailId) {
     }
   }
   if (videoUrl == null) {
-    videoUrl = _deepFirstUrlByKey(data, ['video', 'play']);
+    videoUrl = _deepFirstUrlByKey(data, ['video', 'play', 'download']);
   }
 
-  if (imgUrls.isNotEmpty && videoUrl == null) {
+  // 图文（图片列表）
+  final imgUrls = <String>[];
+  for (final key in [
+    'images',
+    'img_list',
+    'image_list',
+    'imgUrls',
+    'img_urls',
+    'image_urls'
+  ]) {
+    imgUrls.addAll(_collectUrls(data[key]));
+  }
+  if (imgUrls.isEmpty) imgUrls.addAll(_deepImageUrls(data));
+
+  // 后端用中文标注类型：视频 / 图文
+  final typeRaw = (data['type'] ?? '').toString();
+  final isImage = typeRaw.contains('图');
+
+  if (isImage && imgUrls.isNotEmpty) {
     final tasks = imgUrls.asMap().entries.map((e) {
       final idx = e.key + 1;
       return MediaTask(e.value, '${title}_$idx.jpg', 'image');
     }).toList();
     return ParsedDetail(title, 'image', tasks);
-  } else if (videoUrl != null) {
-    return ParsedDetail(title, 'video', [MediaTask(videoUrl, '$title.mp4', 'video')]);
-  } else {
-    throw Exception('未能从返回数据中解析出视频或图片链接');
   }
+  if (videoUrl != null) {
+    return ParsedDetail(
+        title, 'video', [MediaTask(videoUrl, '$title.mp4', 'video')]);
+  }
+  if (imgUrls.isNotEmpty) {
+    final tasks = imgUrls.asMap().entries.map((e) {
+      final idx = e.key + 1;
+      return MediaTask(e.value, '${title}_$idx.jpg', 'image');
+    }).toList();
+    return ParsedDetail(title, 'image', tasks);
+  }
+  throw Exception('未能从返回数据中解析出视频或图片链接');
 }

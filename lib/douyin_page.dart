@@ -61,6 +61,34 @@ class _DouyinPageState extends State<DouyinPage> {
 
   void _refreshList() => setState(() => _items = Store.instance.items.toList());
 
+  /// 申请通知权限（幂等：已授权则跳过）
+  Future<void> _ensureNotifPerm() async {
+    final s = await Permission.notification.status;
+    if (s.isDenied || s.isRestricted) {
+      await Permission.notification.request();
+    }
+  }
+
+  /// 发一条普通通知（失败/成功/测试结论都走这里，用户无需盯着 App）
+  Future<void> _notify(String title, String body) async {
+    try {
+      await _notif.show(
+        DateTime.now().millisecondsSinceEpoch % 100000,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'download_channel',
+            '下载进度',
+            importance: Importance.high,
+          ),
+        ),
+      );
+    } catch (_) {
+      // 通知权限未授予时静默失败，不影响主流程
+    }
+  }
+
   Future<void> _saveCookie() async {
     await Store.instance.setCookie(_cookieCtl.text.trim());
     await Store.instance.setTestId(_testIdCtl.text.trim());
@@ -68,17 +96,21 @@ class _DouyinPageState extends State<DouyinPage> {
   }
 
   Future<void> _testCookie() async {
+    await _ensureNotifPerm();
     setState(() => _cookieTest = '测试中…');
     try {
       await testCookie(_cookieCtl.text.trim(), _testIdCtl.text.trim());
       setState(() => _cookieTest = '✅ cookie 有效（能正常取到数据）');
+      await _notify('Cookie 测试', '✅ cookie 有效，能正常取到数据');
     } on ApiException catch (e) {
       final reason = e.kind == 'link_expired'
           ? '（链接失效/作品不存在，但 cookie 可能仍有效，建议换一个有效作品ID再测）'
           : '';
       setState(() => _cookieTest = '❌ 无效: ${e.message} $reason');
+      await _notify('Cookie 测试失败', '❌ ${e.message} $reason');
     } catch (e) {
       setState(() => _cookieTest = '❌ 请求失败: $e');
+      await _notify('Cookie 测试失败', '❌ 请求失败: $e');
     }
   }
 
@@ -139,6 +171,8 @@ class _DouyinPageState extends State<DouyinPage> {
         _progress = 1;
         _status = '✅ 下载完成，已存入相册「$kAlbum」';
       });
+      await _notify('抖音下载完成',
+          '已保存${parsed.type == 'image' ? '图文' : '视频'}到相册「$kAlbum」');
       _linkCtl.clear();
     } on ApiException catch (e) {
       final hint = e.kind == 'link_expired'
@@ -147,8 +181,10 @@ class _DouyinPageState extends State<DouyinPage> {
               ? '（解析失败，可能是链接格式不对或 cookie 需要更新）'
               : '';
       setState(() => _status = '❌ 失败[${e.kind}]: ${e.message} $hint');
+      await _notify('抖音下载失败', '❌ [${e.kind}] ${e.message} $hint');
     } catch (e) {
       setState(() => _status = '❌ 失败: $e');
+      await _notify('抖音下载失败', '❌ $e');
     } finally {
       setState(() => _working = false);
     }
@@ -252,7 +288,7 @@ class _DouyinPageState extends State<DouyinPage> {
                 TextField(
                   controller: _testIdCtl,
                   decoration: const InputDecoration(
-                    labelText: '测试作品ID（用于验证 cookie）',
+                    labelText: '测试链接或作品ID（可直接粘贴抖音分享链接）',
                     border: OutlineInputBorder(),
                   ),
                 ),

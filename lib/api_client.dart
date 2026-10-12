@@ -83,18 +83,34 @@ Future<Map<String, dynamic>> fetchDetail(String detailId, String cookie) async {
   return {'raw': data};
 }
 
-/// 测试 cookie 是否有效：用 cookie + 一个测试作品ID 调 /douyin/detail，
-/// 能返回数据说明 cookie 有效；返回鉴权错误说明 cookie 失效
-Future<void> testCookie(String cookie, String testId) async {
-  if (testId.trim().isEmpty) {
-    throw ApiException('unknown', '请先填写「测试作品ID」');
-  }
+/// 测试 cookie 是否有效：支持粘贴「分享链接」或「数字作品ID」两种输入。
+/// 链接会先走 /douyin/share 解析出作品ID，再调 /douyin/detail；
+/// 能返回数据说明 cookie 有效；返回鉴权错误说明 cookie 失效/过期。
+Future<void> testCookie(String cookie, String input) async {
+  final id = await _resolveTestId(input);
   final json = await _postJson(
-      '/douyin/detail', {'detail_id': testId.trim(), 'cookie': cookie});
+      '/douyin/detail', {'detail_id': id, 'cookie': cookie});
   if (json['data'] == null) {
     final msg = (json['message'] ?? 'cookie 可能无效').toString();
     throw ApiException(_classify(msg), 'cookie 无效: $msg');
   }
+}
+
+/// 把用户输入（分享链接 / 短链 / 数字ID）统一解析成作品ID
+Future<String> _resolveTestId(String input) async {
+  final t = input.trim();
+  if (t.isEmpty) throw ApiException('unknown', '请填写测试链接或作品ID');
+  // 看起来像链接 -> 走解析
+  if (t.contains('douyin') || t.toLowerCase().startsWith('http')) {
+    try {
+      final url = await resolveShare(t);
+      final id = extractDetailId(url);
+      if (id != null) return id;
+    } catch (_) {
+      // 解析失败则兜底当原始 ID 用
+    }
+  }
+  return t;
 }
 
 /// 从完整链接里提取抖音作品 ID（如 .../video/733xxxx 或 .../note/733xxxx）
