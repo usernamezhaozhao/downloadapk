@@ -9,9 +9,14 @@ class ParsedDetail {
   final String title;
   final String type; // 'video' | 'image'
   final List<MediaTask> tasks;
+  final String? cover; // 封面图远程地址（static_cover 优先，其次 dynamic_cover）
 
-  ParsedDetail(this.title, this.type, this.tasks);
+  ParsedDetail(this.title, this.type, this.tasks, [this.cover]);
 }
+
+/// 取一个 http 字符串（用于封面字段）
+String? _asStr(dynamic v) =>
+    v is String && v.startsWith('http') ? v : null;
 
 String sanitize(String s) {
   final cleaned = s
@@ -203,6 +208,9 @@ ParsedDetail parseDetail(Map<String, dynamic> data, String detailId) {
   }
   if (imgUrls.isEmpty) imgUrls.addAll(_deepImageUrls(data));
 
+  // 封面：DouK-Downloader 直接返回 static_cover / dynamic_cover 字段
+  final cover = _asStr(data['static_cover']) ?? _asStr(data['dynamic_cover']);
+
   // 后端用中文标注类型：视频 / 图文
   final typeRaw = (data['type'] ?? '').toString();
   final isImage = typeRaw.contains('图');
@@ -212,18 +220,18 @@ ParsedDetail parseDetail(Map<String, dynamic> data, String detailId) {
       final idx = e.key + 1;
       return MediaTask(e.value, '${title}_$idx.jpg', 'image');
     }).toList();
-    return ParsedDetail(title, 'image', tasks);
+    return ParsedDetail(title, 'image', tasks, cover);
   }
   if (videoUrl != null) {
     return ParsedDetail(
-        title, 'video', [MediaTask(videoUrl, '$title.mp4', 'video')]);
+        title, 'video', [MediaTask(videoUrl, '$title.mp4', 'video')], cover);
   }
   if (imgUrls.isNotEmpty) {
     final tasks = imgUrls.asMap().entries.map((e) {
       final idx = e.key + 1;
       return MediaTask(e.value, '${title}_$idx.jpg', 'image');
     }).toList();
-    return ParsedDetail(title, 'image', tasks);
+    return ParsedDetail(title, 'image', tasks, cover);
   }
   throw Exception('未能从返回数据中解析出视频或图片链接');
 }

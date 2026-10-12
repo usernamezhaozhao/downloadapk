@@ -5,6 +5,8 @@ class DownloadItem {
   final String type; // 'video' | 'image'
   final List<String> paths; // 本地私有目录下的文件路径（供列表预览/系统播放器调用）
   final int time; // 下载完成时间戳(ms)
+  final String? coverPath; // 本地封面图路径（下载封面后才有）
+  final String? cover; // 远程封面 URL（预览用，离线不可用）
 
   DownloadItem({
     required this.id,
@@ -12,6 +14,8 @@ class DownloadItem {
     required this.type,
     required this.paths,
     required this.time,
+    this.coverPath,
+    this.cover,
   });
 
   Map<String, dynamic> toJson() => {
@@ -20,6 +24,8 @@ class DownloadItem {
         'type': type,
         'paths': paths,
         'time': time,
+        'coverPath': coverPath,
+        'cover': cover,
       };
 
   factory DownloadItem.fromJson(Map<String, dynamic> j) => DownloadItem(
@@ -28,10 +34,9 @@ class DownloadItem {
         type: j['type'] as String,
         paths: List<String>.from(j['paths'] ?? <String>[]),
         time: j['time'] as int,
+        coverPath: j['coverPath'] as String?,
+        cover: j['cover'] as String?,
       );
-
-  /// 列表里展示用的封面/首图路径
-  String? get coverPath => paths.isNotEmpty ? paths.first : null;
 }
 
 /// 单个待下载媒体（视频或图片）

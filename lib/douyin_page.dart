@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:gal/gal.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -32,6 +33,8 @@ class _DouyinPageState extends State<DouyinPage> {
   String _cookieTest = '未测试';
   double _progress = 0;
   bool _working = false;
+  bool _withCover = true; // 同时下载封面
+  String? _coverUrl; // 解析出的远程封面（预览用）
   List<DownloadItem> _items = [];
   List<String> _debugLogs = [];
 
@@ -144,6 +147,7 @@ class _DouyinPageState extends State<DouyinPage> {
       _progress = 0;
       _status = '① 解析分享链接中…';
       _debugLogs.clear();
+      _coverUrl = null;
     });
     try {
       // 1) 解析分享短链 -> 完整链接
@@ -158,8 +162,12 @@ class _DouyinPageState extends State<DouyinPage> {
       final data = await fetchDetail(id, _cookieCtl.text.trim());
       // 4) 解析媒体
       final parsed = parseDetail(data, id);
-      setState(() => _status = '③ 下载中…（${parsed.type == 'image' ? '图文' : '视频'}）');
+      setState(() {
+        _coverUrl = parsed.cover;
+        _status = '③ 下载中…（${parsed.type == 'image' ? '图文' : '视频'}）';
+      });
       _addDebug('解析结果: type=${parsed.type}, 任务数=${parsed.tasks.length}');
+      _addDebug('封面: ${parsed.cover ?? '(无)'}');
       if (parsed.type == 'image') {
         _addDebug('⚠️ 这是图文，图片字段名若解析不出请把后端 JSON 贴我');
       }
@@ -174,6 +182,23 @@ class _DouyinPageState extends State<DouyinPage> {
         onLog: _addDebug,
         cookie: _cookieCtl.text.trim(),
       );
+      // 5.5) 下载封面（可选）
+      String? coverPath;
+      if (_withCover && parsed.cover != null) {
+        coverPath = await _dl.downloadCover(
+          parsed.cover!,
+          _cookieCtl.text.trim(),
+          _addDebug,
+        );
+        if (coverPath != null) {
+          // 封面也存一份到相册
+          try {
+            await Gal.putImage(coverPath, album: kAlbum);
+          } catch (_) {
+            _addDebug('封面写入相册失败（不影响本机副本）');
+          }
+        }
+      }
       // 6) 记入本地列表
       final item = DownloadItem(
         id: id,
@@ -181,6 +206,8 @@ class _DouyinPageState extends State<DouyinPage> {
         type: parsed.type,
         paths: paths,
         time: DateTime.now().millisecondsSinceEpoch,
+        coverPath: coverPath,
+        cover: parsed.cover,
       );
       await Store.instance.addItem(item);
       _refreshList();
@@ -223,14 +250,25 @@ class _DouyinPageState extends State<DouyinPage> {
         title: Text(item.title),
         content: SizedBox(
           width: double.maxFinite,
-          child: item.type == 'image'
-              ? ListView(
-                  shrinkWrap: true,
-                  children: item.paths
-                      .map((p) => Image.file(File(p)))
-                      .toList(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (item.coverPath != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Image.file(File(item.coverPath!), height: 120, fit: BoxFit.cover),
                 )
-              : const Center(child: Icon(Icons.play_circle_fill, size: 64)),
+              else if (item.cover != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Image.network(item.cover!, height: 120, fit: BoxFit.cover),
+                ),
+              if (item.type == 'image')
+                ...item.paths.map((p) => Image.file(File(p))).toList()
+              else
+                const Center(child: Icon(Icons.play_circle_fill, size: 64)),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -250,14 +288,14 @@ class _DouyinPageState extends State<DouyinPage> {
   }
 
   Widget _itemCard(DownloadItem it) {
-    final cover = it.coverPath;
+    final cover = it.coverPath ?? it.cover;
+    final coverIsLocal = it.coverPath != null;
     return Card(
       child: ListTile(
         leading: cover != null
-            ? (it.type == 'image'
-                ? Image.file(File(cover),
-                    width: 48, height: 48, fit: BoxFit.cover)
-                : const Icon(Icons.video_file, size: 40))
+            ? (coverIsLocal
+                ? Image.file(File(cover), width: 48, height: 48, fit: BoxFit.cover)
+                : Image.network(cover, width: 48, height: 48, fit: BoxFit.cover))
             : const Icon(Icons.file_present),
         title: Text(it.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text('${it.type == 'image' ? '图文' : '视频'} · ${it.paths.length} 个文件'),
@@ -347,6 +385,31 @@ class _DouyinPageState extends State<DouyinPage> {
                   icon: const Icon(Icons.download),
                   label: Text(_working ? '下载中…' : '下载'),
                 ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _withCover,
+                      onChanged: _working
+                          ? null
+                          : (v) => setState(() => _withCover = v ?? true),
+                    ),
+                    const Text('同时下载封面'),
+                  ],
+                ),
+                if (_coverUrl != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('封面预览：',
+                            style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(height: 4),
+                        Image.network(_coverUrl!, height: 120, fit: BoxFit.cover),
+                      ],
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 Text(_status),
                 if (_progress > 0 && _progress < 1)

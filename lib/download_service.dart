@@ -112,6 +112,30 @@ class DownloadService {
     return results;
   }
 
+  /// 下载封面图（与媒体同样的请求头逻辑：Referer + UA + Cookie）。
+  /// 成功返回本地路径，失败（非图片/网络错误）返回 null 并清理临时文件。
+  Future<String?> downloadCover(
+    String url,
+    String cookie,
+    void Function(String) onLog,
+  ) async {
+    final extDir = await getExternalStorageDirectory();
+    final saveDir = Directory('${extDir!.path}/抖音');
+    await saveDir.create(recursive: true);
+    final name = 'cover_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final path = '${saveDir.path}/$name';
+    onLog('开始下载封面: $url');
+    final r = await _downloadOne(url, path, cookie, (_) {}, onLog);
+    onLog('封面落盘校验: HTTP ${r.status} · ${r.contentType} · ${r.magic}');
+    if (!r.ok) {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+      onLog('封面不是有效图片，已跳过');
+      return null;
+    }
+    return path;
+  }
+
   /// 返回的单条下载结果（用于调试日志）
   _DlResult _result({
     required int status,
@@ -229,6 +253,12 @@ class DownloadService {
       }
       if (bytes.first == 0x47) return 'MPEG-TS($hex)';
       if (bytes.first == 0x3C) return 'HTML?($hex)';
+      // WebP: "RIFF"...."WEBP"
+      if (bytes.length >= 12 &&
+          bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+          bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
+        return 'WEBP($hex)';
+      }
       return hex;
     } catch (_) {
       return 'READ_ERR';
@@ -239,6 +269,7 @@ class DownloadService {
       m.startsWith('MP4') ||
       m.startsWith('JPG') ||
       m.startsWith('PNG') ||
+      m.startsWith('WEBP') ||
       m.startsWith('MPEG-TS');
 
   void _showProgress(double p, String title) {
