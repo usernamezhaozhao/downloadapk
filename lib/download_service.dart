@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:gal/gal.dart';
@@ -60,7 +61,7 @@ class DownloadService {
     final results = <String>[];
     int done = 0;
     for (final t in tasks) {
-      final localPath = '${saveDir.path}/${t.fileName}';
+      final localPath = '${saveDir.path}/${safeFileName(t.fileName)}';
       onLog('开始下载: ${t.kind} -> $localPath');
       final r = await _downloadOne(t.url, localPath, cookie, (p) {
         final overall = (done + p) / tasks.length;
@@ -124,6 +125,37 @@ class DownloadService {
       return null;
     }
     return path;
+  }
+
+  /// 清洗文件名（修复长标题下载失败）：
+  /// Android 模拟存储（FUSE/sdcardfs）单个文件名上限 255 字节，中文每字 3 字节，
+  /// 长标题原样当文件名会超限，open() 报 "No such file or directory (errno 2)"。
+  /// 处理：① 替换文件系统非法字符；② 按 UTF-8 字节截断到 maxBytes（整字符截断，保留扩展名）。
+  static String safeFileName(String raw, {int maxBytes = 160}) {
+    var name = raw.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+    if (name.isEmpty) name = 'media';
+
+    // 拆出扩展名（最多 5 字符，如 .mp4/.jpg）
+    String ext = '';
+    final dot = name.lastIndexOf('.');
+    if (dot > 0 && name.length - dot <= 6) {
+      ext = name.substring(dot);
+      name = name.substring(0, dot);
+    }
+
+    // 按 UTF-8 字节数整字符截断
+    if (utf8.encode(name).length > maxBytes) {
+      final buf = StringBuffer();
+      int used = 0;
+      for (final ch in name.runes) {
+        final cb = utf8.encode(String.fromCharCode(ch)).length;
+        if (used + cb > maxBytes) break;
+        buf.writeCharCode(ch);
+        used += cb;
+      }
+      name = buf.toString();
+    }
+    return '$name$ext';
   }
 
   /// 返回的单条下载结果（用于调试日志）
