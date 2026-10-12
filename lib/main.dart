@@ -8,6 +8,10 @@ import 'home_page.dart';
 import 'notif_service.dart';
 import 'permission_test_page.dart';
 
+/// 原生透明 Activity（ClipboardProxyActivity）在真正获得焦点后读到的剪贴板文本，
+/// 经此通道回传到 Dart（照 CSDN 文章架构：用透明 Activity 合法绕开后台读剪贴板限制）。
+const MethodChannel _clipboardProxyChannel = MethodChannel('clipboard_proxy');
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // v11：先初始化主↔服务通信端口
@@ -100,6 +104,14 @@ class _HomeTabsState extends State<HomeTabs> {
     onNotifTap = _handlePayload;
     // 前台服务检测到抖音链接 → 主 Isolate 弹系统 heads-up（点了才下载）
     FlutterForegroundTask.addTaskDataCallback(_onClipboardLink);
+    // 原生透明 Activity 读到的剪贴板文本，经此通道发回，走同一套横幅逻辑
+    _clipboardProxyChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onClipboard') {
+        final text = call.arguments as String?;
+        if (text != null && text.isNotEmpty) _onClipboardLink(text);
+      }
+      return null;
+    });
   }
 
   /// 前台服务把检测到的抖音链接发回来，这里弹系统横幅（与通知点击同款体验）。

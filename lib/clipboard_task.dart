@@ -58,4 +58,22 @@ class ClipboardTaskHandler extends TaskHandler {
 
   @override
   void onNotificationPressed() {}
+
+  /// 常驻通知上的「读取剪贴板」按钮被点击：照 CSDN 文章用透明 Activity 在
+  /// 真正获得焦点后读剪贴板（后台读会抛 SecurityException）。这里经原生
+  /// native_control 通道启动透明 Activity；若通道不可用则兜底把 App 拉前台。
+  @override
+  void onNotificationButtonPressed(String id) {
+    if (id == 'read_clipboard') _launchProxy();
+  }
+
+  Future<void> _launchProxy() async {
+    try {
+      await const MethodChannel('native_control')
+          .invokeMethod<void>('startClipboardProxy');
+    } catch (_) {
+      // 兜底：把 App 拉到前台，走回前台检测路径
+      FlutterForegroundTask.launchApp();
+    }
+  }
 }

@@ -177,7 +177,10 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
             callback: clipboardTaskStartCallback,
             serviceId: 256,
             notificationTitle: '抖音下载器 · 剪贴板监听中',
-            notificationText: '复制抖音链接后，回到本App自动识别并提示',
+            notificationText: '复制抖音链接后，点通知上的「读取剪贴板」即可自动弹下载横幅',
+            notificationButtons: const [
+              NotificationButton(id: 'read_clipboard', text: '读取剪贴板'),
+            ],
           );
         }
       } else {
