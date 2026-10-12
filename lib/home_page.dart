@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'bili_cache.dart';
+import 'shizuku_bili.dart';
 import 'models.dart';
 import 'store.dart';
 import 'video_preview.dart';
@@ -51,6 +52,12 @@ class _HomePageState extends State<HomePage> {
   bool? _biliPerm; // null=未检查 / true=已授权 / false=缺「所有文件访问」
   String? _biliError; // B站扫描失败/为空的原因（诊断用）
   List<BiliEntry> _bili = [];
+
+  // —— Shizuku（shell 权限读 /Android/data，绕开 ROM 对 MANAGE 的限制）——
+  bool? _shizukuAvailable; // null=未探测 / true=Shizuku 在线 / false=未装或未运行
+  bool? _shizukuAuthorized; // null=未探测 / true=已授权 / false=待授权
+  bool _biliViaShizuku = false; // 当前列表是否经 Shizuku 读出
+  bool _forceManage = false; // 用户选择改用「所有文件访问」而非 Shizuku
 
   @override
   void initState() {
@@ -200,6 +207,33 @@ class _HomePageState extends State<HomePage> {
     if (_biliLoading) return;
     setState(() => _biliLoading = true);
     try {
+      // 优先 Shizuku：以 shell 权限读 /Android/data（部分 ROM 对 MANAGE 仍拒）
+      if (!_forceManage) {
+        final avail = await ShizukuBili.available;
+        if (mounted) setState(() => _shizukuAvailable = avail);
+        if (avail) {
+          final auth = await ShizukuBili.authorized;
+          if (mounted) setState(() => _shizukuAuthorized = auth);
+          if (!auth) {
+            // 在线但未授权：留给界面提示去授权，不继续
+            if (mounted) setState(() => _biliLoading = false);
+            return;
+          }
+          final entries = await ShizukuBili.scan();
+          if (mounted) {
+            setState(() {
+              _bili = entries;
+              _biliViaShizuku = true;
+              _biliError = entries.isEmpty
+                  ? 'Shizuku 已读取，但没扫到任何 B站缓存'
+                  : null;
+              _biliLoading = false;
+            });
+          }
+          return;
+        }
+      }
+      // 回退：MANAGE_EXTERNAL_STORAGE 直读（需用户在系统设置授予）
       final s = await Permission.manageExternalStorage.status;
       if (!s.isGranted) {
         if (mounted) {
@@ -214,6 +248,7 @@ class _HomePageState extends State<HomePage> {
       if (mounted) {
         setState(() {
           _bili = entries;
+          _biliViaShizuku = false;
           _biliPerm = true;
           _biliError = entries.isEmpty ? BiliCache.lastError : null;
           _biliLoading = false;
@@ -231,6 +266,15 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _requestBiliPerm() async {
     await Permission.manageExternalStorage.request();
+    _loadBili();
+  }
+
+  Future<void> _requestShizuku() async {
+    final ok = await ShizukuBili.requestAuth();
+    if (!ok && mounted) {
+      // 授权失败（用户拒绝 / Shizuku 未运行），提示改用所有文件访问
+      setState(() => _forceManage = true);
+    }
     _loadBili();
   }
 
@@ -275,7 +319,11 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (ok != true) return;
-    await BiliCache.remove(e);
+    if (_biliViaShizuku) {
+      await ShizukuBili.remove(e);
+    } else {
+      await BiliCache.remove(e);
+    }
     _loadBili();
   }
 
@@ -521,6 +569,38 @@ class _HomePageState extends State<HomePage> {
   Widget _biliBody() {
     if (_biliLoading) {
       return const Center(child: CircularProgressIndicator());
+    }
+    // Shizuku 在线但未授权：引导授权（也可改用所有文件访问）
+    if (_shizukuAvailable == true && _shizukuAuthorized != true && !_forceManage) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified_user, size: 48, color: Colors.grey[400]),
+            const SizedBox(height: 12),
+            const Text(
+              '已检测到 Shizuku，但本应用尚未被授权\n'
+              '点击授权后将以 shell 权限读取 B站缓存\n'
+              '（绕开 ROM 对「所有文件访问」的限制）',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _requestShizuku,
+              icon: const Icon(Icons.login),
+              label: const Text('授权 Shizuku'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() => _forceManage = true);
+                _loadBili();
+              },
+              child: const Text('改用「所有文件访问」'),
+            ),
+          ],
+        ),
+      );
     }
     if (_biliPerm == false) {
       return Center(

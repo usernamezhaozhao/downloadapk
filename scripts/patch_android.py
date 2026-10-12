@@ -87,6 +87,17 @@ def patch_manifest() -> None:
             android:foregroundServiceType="dataSync" />"""
         content = content.replace("</application>", fg + "\n    </application>", 1)
 
+    # 3.6) 注入 Shizuku provider（shizuku_api 包 bind Shizuku 服务必需）
+    if "rikka.shizuku.ShizukuProvider" not in content:
+        shizuku = """        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />"""
+        content = content.replace("</application>", shizuku + "\n    </application>", 1)
+
     # 4) 注入 <queries>（Android 11+ 让系统能找到视频/图片播放器）
     if "<queries>" not in content:
         queries = """    <queries>
@@ -189,8 +200,49 @@ def write_file_paths() -> None:
         f.write(xml)
 
 
+def patch_min_sdk() -> None:
+    """shizuku_api 要求 minSdk >= 24，flutter create 默认可能更低，提到 24。"""
+    for gradle in ("android/app/build.gradle", "android/app/build.gradle.kts"):
+        if not os.path.exists(gradle):
+            continue
+        with open(gradle, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        patched = False
+        if "minSdkVersion" in content:
+            newc, n = re.subn(
+                r"minSdkVersion\s+(\d+)",
+                lambda m: "minSdkVersion %d" % max(int(m.group(1)), 24),
+                content,
+                count=1,
+            )
+            if n:
+                content = newc
+                patched = True
+                print("patched minSdkVersion to 24 in %s" % gradle)
+        elif "minSdk" in content:
+            newc, n = re.subn(
+                r"minSdk\s*=\s*(\d+)",
+                lambda m: "minSdk = %d" % max(int(m.group(1)), 24),
+                content,
+                count=1,
+            )
+            if n:
+                content = newc
+                patched = True
+                print("patched minSdk to 24 in %s" % gradle)
+        else:
+            print("WARN: no minSdk in %s; shizuku_api may fail to build" % gradle)
+            continue
+
+        if patched:
+            with open(gradle, "w", encoding="utf-8") as f:
+                f.write(content)
+
+
 if __name__ == "__main__":
     patch_manifest()
     patch_build_gradle()
+    patch_min_sdk()
     write_file_paths()
-    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring")
+    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + shizuku provider + minSdk24")

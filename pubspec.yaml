@@ -30,6 +30,8 @@ dependencies:
   path: ^1.9.0
   # 前台服务：常驻后台轮询剪贴板，复制抖音链接即时弹横幅（比「回到前台才检测」更实时）
   flutter_foreground_task: ^11.0.3
+  # Shizuku：以 shell 权限读 /Android/data 下 B站缓存（绕开 MANAGE_EXTERNAL_STORAGE 在部分 ROM 被拒）
+  shizuku_api: ^1.2.3
 
 dev_dependencies:
   flutter_test:
