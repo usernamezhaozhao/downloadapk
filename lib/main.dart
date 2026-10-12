@@ -14,14 +14,14 @@ void main() {
   FlutterForegroundTask.initCommunicationPort();
   // 前台服务引擎初始化（常驻监听剪贴板用；状态栏会有一条低优先级常驻通知）
   FlutterForegroundTask.init(
-    androidNotificationOptions: const AndroidNotificationOptions(
+    androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'clipboard_channel',
       channelName: '剪贴板监听',
       channelDescription: '后台监听抖音分享链接，复制后自动弹下载横幅',
       onlyAlertOnce: true,
     ),
-    iosNotificationOptions: const IOSNotificationOptions(),
-    foregroundTaskOptions: const ForegroundTaskOptions(
+    iosNotificationOptions: IOSNotificationOptions(),
+    foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.repeat(2000),
       autoRunOnBoot: false,
       autoRunOnMyPackageReplaced: false,
