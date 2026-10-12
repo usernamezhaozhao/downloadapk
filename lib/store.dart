@@ -5,6 +5,7 @@ import 'models.dart';
 const _kItems = 'dl_items';
 const _kCookie = 'cookie';
 const _kTestId = 'test_id';
+const _kClipboardMonitor = 'clipboard_monitor';
 
 /// 本地持久化：cookie / 测试作品ID / 下载列表索引
 class Store {
@@ -55,5 +56,12 @@ class Store {
   Future<void> setTestId(String v) async {
     _prefs ??= await SharedPreferences.getInstance();
     await _prefs!.setString(_kTestId, v);
+  }
+
+  /// 剪贴板自动监听开关（复制抖音链接后自动弹横幅并下载）。默认开启。
+  bool get clipboardMonitor => _prefs?.getBool(_kClipboardMonitor) ?? true;
+  Future<void> setClipboardMonitor(bool v) async {
+    _prefs ??= await SharedPreferences.getInstance();
+    await _prefs!.setBool(_kClipboardMonitor, v);
   }
 }

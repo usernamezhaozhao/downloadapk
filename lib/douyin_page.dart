@@ -36,6 +36,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   double _progress = 0;
   bool _working = false;
   bool _withCover = true; // 同时下载封面
+  bool _clipboardMonitor = true; // 剪贴板自动监听开关（持久化）
   String? _coverUrl; // 解析出的远程封面（预览用）
   List<String> _debugLogs = [];
 
@@ -83,7 +84,8 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       caseSensitive: false);
 
   Future<void> _checkClipboard() async {
-    if (_working || !mounted) return;
+    // 开关关闭时完全不监听
+    if (!_clipboardMonitor || _working || !mounted) return;
     try {
       final data = await Clipboard.getData('text/plain');
       final text = data?.text ?? '';
@@ -93,33 +95,28 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       if (link == _lastClipboardLink) return;
       _lastClipboardLink = link;
       if (!mounted) return;
-      // 系统级横幅通知（heads-up）：不管 App 在前台还是后台都会从
-      // 屏幕顶部悬浮弹出，点一下就回 App 自动下载。
+      // 系统级 heads-up 横幅：返回前台时尝试从屏幕顶部悬浮弹出。
+      // 注意：App 在前台时部分厂商（小米/华为）会把 heads-up 收进状态栏不弹，
+      // 所以下面再用 App 内顶部横幅兜底，保证一定能看见、点了就下载。
       final granted = await _ensureNotifPerm();
       if (granted) {
         await showHeadsUp('检测到抖音链接', '识别到相关内容，点击立即下载', payload: 'clip:$link');
-      } else {
-        // 兜底：没通知权限时退回 App 内弹窗
-        final ok = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('检测到抖音链接'),
-            content: Text(link, maxLines: 3, overflow: TextOverflow.ellipsis),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('忽略')),
-              ElevatedButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('立即下载')),
-            ],
-          ),
-        );
-        if (ok == true && mounted) {
-          _linkCtl.text = link;
-          _download();
-        }
       }
+      // App 内顶部横幅（兜底，始终可见可点）
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('检测到抖音链接，是否立即下载？'),
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: '立即下载',
+            onPressed: () {
+              if (_working || !mounted) return;
+              _linkCtl.text = link;
+              _download();
+            },
+          ),
+        ),
+      );
     } catch (_) {
       // 剪贴板不可用时静默降级
     }
@@ -131,6 +128,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       // 通知插件由 notif_service.initAppNotif() 统一初始化（含点击回调）。
       await _dl.init();
       _cookieCtl.text = Store.instance.cookie;
+      _clipboardMonitor = Store.instance.clipboardMonitor;
       // 测试链接优先用已保存的；为空则填你指定的固定测试链接（懒人一键测）
       _testIdCtl.text = Store.instance.testId.isNotEmpty
           ? Store.instance.testId
@@ -391,6 +389,20 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
                     ),
                     const Text('同时下载封面'),
                   ],
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('剪贴板自动监听'),
+                  subtitle: const Text('复制抖音链接后自动弹横幅并下载'),
+                  value: _clipboardMonitor,
+                  onChanged: _working
+                      ? null
+                      : (v) async {
+                          final val = v ?? true;
+                          setState(() => _clipboardMonitor = val);
+                          await Store.instance.setClipboardMonitor(val);
+                        },
                 ),
                 if (_coverUrl != null)
                   Padding(
