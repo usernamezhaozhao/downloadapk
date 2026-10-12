@@ -172,10 +172,6 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
             serviceId: 256,
             notificationTitle: '抖音下载器 · 剪贴板监听中',
             notificationText: '复制抖音链接即可自动弹下载横幅',
-            notificationIcon: NotificationIconData(
-              resType: ResourceType.mipmap,
-              resName: 'ic_launcher',
-            ),
           );
         }
       } else {
