@@ -17,7 +17,7 @@ void main() {
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'clipboard_channel',
       channelName: '剪贴板监听',
-      channelDescription: '后台监听抖音分享链接，复制后自动弹下载横幅',
+      channelDescription: '后台监听剪贴板，回到本App时自动识别抖音链接',
       onlyAlertOnce: true,
     ),
     iosNotificationOptions: IOSNotificationOptions(),
@@ -163,7 +163,10 @@ class _HomeTabsState extends State<HomeTabs> {
               refreshSignal: _tabSignal,
               pendingPreview: _pendingPreview,
             ),
-            DouyinPage(pendingLink: _pendingLink),
+            DouyinPage(
+              pendingLink: _pendingLink,
+              onDetected: () => setState(() => _idx = 1),
+            ),
             const PermissionTestPage(),
           ],
         ),

@@ -18,8 +18,10 @@ const String kAlbum = '抖音下载';
 class DouyinPage extends StatefulWidget {
   /// 横幅通知被点击（携带 'clip:<链接>' 提取出的链接）时，自动填入并下载
   final ValueNotifier<String?>? pendingLink;
+  /// 检测到剪贴板里的抖音链接时回调父级（用于自动切到本页并预填链接）
+  final VoidCallback? onDetected;
 
-  const DouyinPage({super.key, this.pendingLink});
+  const DouyinPage({super.key, this.pendingLink, this.onDetected});
 
   @override
   State<DouyinPage> createState() => _DouyinPageState();
@@ -106,6 +108,10 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       _lastClipboardLink = link;
       _lastClipboardAt = DateTime.now();
       if (!mounted) return;
+      // 把识别到的链接预填进输入框，并让父级自动切到本页，
+      // 用户一眼就能看到“即将下载的是哪条”，而不是只说“检测到链接”。
+      if (_linkCtl.text != link) _linkCtl.text = link;
+      widget.onDetected?.call();
       // 系统级 heads-up 横幅：返回前台时尝试从屏幕顶部悬浮弹出。
       // 注意：App 在前台时部分厂商（小米/华为）会把 heads-up 收进状态栏不弹，
       // 所以下面再用 App 内顶部横幅兜底，保证一定能看见、点了就下载。
@@ -171,7 +177,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
             callback: clipboardTaskStartCallback,
             serviceId: 256,
             notificationTitle: '抖音下载器 · 剪贴板监听中',
-            notificationText: '复制抖音链接即可自动弹下载横幅',
+            notificationText: '复制抖音链接后，回到本App自动识别并提示',
           );
         }
       } else {
@@ -435,7 +441,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('剪贴板自动监听'),
-                  subtitle: const Text('复制抖音链接后自动弹横幅并下载'),
+                  subtitle: const Text('复制链接后回到本App自动识别（安卓10+后台读剪贴板受限）'),
                   value: _clipboardMonitor,
                   onChanged: _working
                       ? null
