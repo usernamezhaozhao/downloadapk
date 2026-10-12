@@ -42,7 +42,9 @@ void main() {
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('首页'), findsOneWidget);
-    expect(find.text('抖音'), findsOneWidget);
+    // 「抖音」出现两处：底部 Tab + 首页抖音/B站切换按钮
+    expect(find.text('抖音'), findsWidgets);
+    expect(find.text('B站'), findsWidgets);
     expect(find.text('测试'), findsOneWidget);
   });
 

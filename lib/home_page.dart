@@ -3,13 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
+import 'bili_cache.dart';
 import 'models.dart';
-import 'notif_service.dart';
 import 'store.dart';
 import 'video_preview.dart';
 
 /// 首页：缓存下载展示（仿 B 站「离线缓存」页）。
+/// 顶部「抖音 / B站」切换：抖音为本 App 下载记录；B站直读B站客户端缓存目录。
 /// 支持：搜索 / 删除 / 按作品归组（封面+标题+文件数+容量）/ 点卡片自动预览播放 / 底部容量统计。
 class HomePage extends StatefulWidget {
   /// 主页 Tab 每次切换时递增，用于返回首页时刷新缓存列表
@@ -43,18 +45,25 @@ class _HomePageState extends State<HomePage> {
   int? _freeBytes; // 设备剩余空间（df 取不到则为 null）
   String? _pendingId; // 通知点击后要自动打开预览的作品 id
 
+  // —— B站缓存 ——
+  String _source = 'douyin'; // 'douyin' | 'bili'
+  bool _biliLoading = false;
+  bool? _biliPerm; // null=未检查 / true=已授权 / false=缺「所有文件访问」
+  List<BiliEntry> _bili = [];
+
   @override
   void initState() {
     super.initState();
     widget.refreshSignal?.addListener(_onSignal);
     widget.pendingPreview?.addListener(_onPending);
     _load();
-    // 冷启动（从通知点击直接拉起 App）的情况走这里
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkLaunchFromNotif());
   }
 
   void _onSignal() {
-    if (mounted) _load();
+    if (mounted) {
+      _load();
+      if (_source == 'bili') _loadBili();
+    }
   }
 
   void _onPending() {
@@ -63,20 +72,6 @@ class _HomePageState extends State<HomePage> {
     widget.pendingPreview!.value = null;
     _pendingId = id;
     if (_loaded) _tryOpenPending();
-  }
-
-  /// 处理「点击通知启动 App」的场景（应用被杀后从通知拉起）
-  Future<void> _checkLaunchFromNotif() async {
-    try {
-      final d = await appNotif.getNotificationAppLaunchDetails();
-      final p = d?.notificationResponse?.payload;
-      if (p != null) {
-        _pendingId = p;
-        if (_loaded) _tryOpenPending();
-      }
-    } catch (_) {
-      // 插件不可用（如测试环境）时忽略
-    }
   }
 
   void _tryOpenPending() {
@@ -196,6 +191,85 @@ class _HomePageState extends State<HomePage> {
     }
     await Store.instance.removeItem(g.id);
     _load();
+  }
+
+  // ———————— B站缓存（直读B站客户端目录） ————————
+
+  Future<void> _loadBili() async {
+    if (_biliLoading) return;
+    setState(() => _biliLoading = true);
+    try {
+      final s = await Permission.manageExternalStorage.status;
+      if (!s.isGranted) {
+        if (mounted) {
+          setState(() {
+            _biliPerm = false;
+            _biliLoading = false;
+          });
+        }
+        return;
+      }
+      final entries = await BiliCache.scan();
+      if (mounted) {
+        setState(() {
+          _bili = entries;
+          _biliPerm = true;
+          _biliLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _biliLoading = false);
+    }
+  }
+
+  Future<void> _requestBiliPerm() async {
+    await Permission.manageExternalStorage.request();
+    _loadBili();
+  }
+
+  void _previewBili(BiliEntry e) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: e.videoPath != null
+              ? VideoPreview(e.videoPath!)
+              : const SizedBox(
+                  height: 120,
+                  child: Center(child: Text('未找到视频文件 (video.m4s)')),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteBili(BiliEntry e) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('删除B站缓存'),
+        content: Text('删除「${e.title}」？\n将删除B站客户端的这条缓存（B站内也会消失）。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await BiliCache.remove(e);
+    _loadBili();
   }
 
   void _preview(_Group g) {
@@ -346,13 +420,38 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = _grouped();
-    final used = groups.fold<int>(0, (s, g) => s + _groupSize(g));
     return Column(
       children: [
-        // —— 搜索框 ——
+        // —— 抖音 / B站 切换 ——
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+          child: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(
+                  value: 'douyin',
+                  label: Text('抖音'),
+                  icon: Icon(Icons.music_note, size: 18)),
+              ButtonSegment(
+                  value: 'bili',
+                  label: Text('B站'),
+                  icon: Icon(Icons.live_tv, size: 18)),
+            ],
+            selected: {_source},
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              backgroundColor: WidgetStatePropertyAll(Colors.white),
+              side: WidgetStatePropertyAll(
+                  BorderSide(color: Color(0xFFE0E0E0))),
+            ),
+            onSelectionChanged: (s) {
+              setState(() => _source = s.first);
+              if (s.first == 'bili') _loadBili();
+            },
+          ),
+        ),
+        // —— 搜索框（抖音/B站共用） ——
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: TextField(
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
@@ -364,42 +463,188 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         Expanded(
-          child: !_loaded
-              ? const Center(child: CircularProgressIndicator())
-              : groups.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.folder_off_outlined,
-                              size: 48, color: Colors.grey[400]),
-                          const SizedBox(height: 8),
-                          Text(
-                            _query.isEmpty
-                                ? '还没有下载记录\n去「抖音」页下载第一个作品吧'
-                                : '没有匹配「$_query」的结果',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: [
-                        for (final g in groups) _card(g),
-                        const SizedBox(height: 8),
-                        Text(
-                          '已使用 ${_fmt(used)}'
-                          '${_freeBytes != null ? ' / 剩余 ${_fmt(_freeBytes!)}' : ''}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: Colors.grey, fontSize: 12),
-                        ),
-                      ],
-                    ),
+          child: _source == 'douyin' ? _douyinBody() : _biliBody(),
         ),
       ],
+    );
+  }
+
+  // —— 抖音：本 App 下载记录 ——
+  Widget _douyinBody() {
+    final groups = _grouped()
+        .where((g) => g.title.toLowerCase().contains(_query.trim().toLowerCase()))
+        .toList();
+    final used = groups.fold<int>(0, (s, g) => s + _groupSize(g));
+    return !_loaded
+        ? const Center(child: CircularProgressIndicator())
+        : groups.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.folder_off_outlined,
+                        size: 48, color: Colors.grey[400]),
+                    const SizedBox(height: 8),
+                    Text(
+                      _query.isEmpty
+                          ? '还没有下载记录\n去「抖音」页下载第一个作品吧'
+                          : '没有匹配「$_query」的结果',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.all(12),
+                children: [
+                  for (final g in groups) _card(g),
+                  const SizedBox(height: 8),
+                  Text(
+                    '已使用 ${_fmt(used)}'
+                    '${_freeBytes != null ? ' / 剩余 ${_fmt(_freeBytes!)}' : ''}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              );
+  }
+
+  // —— B站：直读B站客户端离线缓存 ——
+  Widget _biliBody() {
+    if (_biliLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_biliPerm == false) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.folder_locked_outlined,
+                size: 48, color: Colors.grey[400]),
+            const SizedBox(height: 12),
+            const Text(
+              '读取B站缓存需要「所有文件访问」权限\n（安卓限制，只能到系统设置手动授予）',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _requestBiliPerm,
+              icon: const Icon(Icons.settings),
+              label: const Text('去授权'),
+            ),
+          ],
+        ),
+      );
+    }
+    final q = _query.trim().toLowerCase();
+    final list = q.isEmpty
+        ? _bili
+        : _bili.where((e) => e.title.toLowerCase().contains(q)).toList();
+    if (list.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.tv_off_outlined, size: 48, color: Colors.grey[400]),
+            const SizedBox(height: 8),
+            Text(
+              _query.isEmpty
+                  ? '未找到B站离线缓存\n（需要B站 App 缓存过视频；路径 ${BiliCache.rootPath}）'
+                  : '没有匹配「$_query」的结果',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+    final total = list.fold<int>(0, (s, e) => s + e.bytes);
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        for (final e in list) _biliCard(e),
+        const SizedBox(height: 8),
+        Text('B站缓存共 ${_fmt(total)}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.grey, fontSize: 12)),
+      ],
+    );
+  }
+
+  Widget _biliCard(BiliEntry e) {
+    final img = e.cover != null
+        ? Image.network(e.cover!,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.video_file, size: 36))
+        : const Icon(Icons.video_file, size: 36);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _previewBili(e),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 110,
+                height: 70,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      img,
+                      Positioned(
+                        left: 4,
+                        bottom: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          color: Colors.black54,
+                          child: const Text('B站缓存',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 10)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      e.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      e.videoPath != null
+                          ? '${_fmt(e.bytes)} · 可预览'
+                          : '${_fmt(e.bytes)} · 未找到视频文件',
+                      style:
+                          const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: '删除',
+                onPressed: () => _deleteBili(e),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

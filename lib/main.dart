@@ -16,7 +16,33 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: '抖音下载器',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.green),
+      // 纯白主题：白底 + 白 AppBar + 白卡片，仿 B 站离线缓存页的干净风格
+      theme: ThemeData(
+        useMaterial3: true,
+        scaffoldBackgroundColor: Colors.white,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey)
+            .copyWith(surface: Colors.white),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black87,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.white,
+          centerTitle: true,
+        ),
+        cardTheme: const CardThemeData(
+          color: Colors.white,
+          elevation: 0.4,
+          surfaceTintColor: Colors.white,
+          shadowColor: Colors.black12,
+        ),
+        navigationBarTheme: const NavigationBarThemeData(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
+          indicatorColor: Color(0xFFEFEFEF),
+        ),
+        dividerColor: const Color(0xFFEEEEEE),
+      ),
       home: const HomeTabs(),
     );
   }
@@ -36,22 +62,39 @@ class _HomeTabsState extends State<HomeTabs> {
   final ValueNotifier<int> _tabSignal = ValueNotifier<int>(0);
   // 通知被点击（携带作品 id）时，首页据此自动打开预览
   final ValueNotifier<String?> _pendingPreview = ValueNotifier<String?>(null);
+  // 剪贴板横幅被点击（携带抖音链接）时，抖音页据此自动填入并下载
+  final ValueNotifier<String?> _pendingLink = ValueNotifier<String?>(null);
 
   @override
   void initState() {
     super.initState();
-    initAppNotif();
-    // 通知点击：跳到首页并让首页打开对应作品预览
-    onNotifTap = (payload) {
-      if (payload != null) _pendingPreview.value = payload;
+    initAppNotif().then((_) async {
+      // 冷启动：App 被杀后从通知直接拉起，也要分发 payload
+      try {
+        final d = await appNotif.getNotificationAppLaunchDetails();
+        _handlePayload(d?.notificationResponse?.payload);
+      } catch (_) {}
+    });
+    onNotifTap = _handlePayload;
+  }
+
+  /// 统一分发通知点击：'clip:<链接>' → 抖音页自动下载；其余 → 首页预览
+  void _handlePayload(String? p) {
+    if (p == null || !mounted) return;
+    if (p.startsWith('clip:')) {
+      _pendingLink.value = p.substring(5);
+      setState(() => _idx = 1);
+    } else {
+      _pendingPreview.value = p;
       setState(() => _idx = 0);
-    };
+    }
   }
 
   @override
   void dispose() {
     _tabSignal.dispose();
     _pendingPreview.dispose();
+    _pendingLink.dispose();
     super.dispose();
   }
 
@@ -85,7 +128,7 @@ class _HomeTabsState extends State<HomeTabs> {
               refreshSignal: _tabSignal,
               pendingPreview: _pendingPreview,
             ),
-            const DouyinPage(),
+            DouyinPage(pendingLink: _pendingLink),
             const PermissionTestPage(),
           ],
         ),

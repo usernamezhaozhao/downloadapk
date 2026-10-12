@@ -16,7 +16,7 @@ Future<void> initAppNotif() async {
     ),
     onDidReceiveNotificationResponse: (resp) => onNotifTap?.call(resp.payload),
   );
-  // 创建下载进度/结果通知通道（与 DownloadService 中常量保持一致）
+  // 下载进度/结果通道（常驻进度条用，低优先级不吵）
   await appNotif
       .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>()
@@ -26,4 +26,40 @@ Future<void> initAppNotif() async {
         description: '抖音下载进度与结果通知',
         importance: Importance.low,
       ));
+  // 剪贴板横幅提醒通道：importance max → 在 Android 8+ 上以「横幅」
+  // 形式悬浮弹出（即使 App 在前台），即用户要的小米那种顶部横幅效果。
+  await appNotif
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(const AndroidNotificationChannel(
+        'heads_up_channel',
+        '剪贴板提醒',
+        description: '检测到抖音链接时的横幅提醒，点击立即下载',
+        importance: Importance.max,
+      ));
+}
+
+/// 发一条 heads-up 横幅通知（自动弹出悬浮显示，点按走 onNotifTap）。
+/// [payload] 建议带 'clip:<链接>' 前缀以区分于下载成功跳转。
+Future<void> showHeadsUp(String title, String body,
+    {String? payload}) async {
+  try {
+    await appNotif.show(
+      9001, // 固定 id：同链接新横幅覆盖旧的，不堆积
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'heads_up_channel',
+          '剪贴板提醒',
+          importance: Importance.max,
+          priority: Priority.high,
+          category: AndroidNotificationCategory.categorySocial,
+        ),
+      ),
+      payload: payload,
+    );
+  } catch (_) {
+    // 通知权限未授予等场景静默失败
+  }
 }

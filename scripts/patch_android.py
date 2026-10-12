@@ -25,6 +25,9 @@ PERMISSIONS = [
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+    # Android 11+ 访问 /Android/data/tv.danmaku.bili（B站缓存目录）需要
+    # 「所有文件访问」特殊权限（用户在系统设置手动授予）
+    "android.permission.MANAGE_EXTERNAL_STORAGE",
 ]
 
 

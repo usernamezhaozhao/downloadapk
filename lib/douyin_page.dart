@@ -14,7 +14,10 @@ import 'store.dart';
 const String kAlbum = '抖音下载';
 
 class DouyinPage extends StatefulWidget {
-  const DouyinPage({super.key});
+  /// 横幅通知被点击（携带 'clip:<链接>' 提取出的链接）时，自动填入并下载
+  final ValueNotifier<String?>? pendingLink;
+
+  const DouyinPage({super.key, this.pendingLink});
 
   @override
   State<DouyinPage> createState() => _DouyinPageState();
@@ -36,9 +39,8 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   String? _coverUrl; // 解析出的远程封面（预览用）
   List<String> _debugLogs = [];
 
-  // 剪贴板监听：上次已提示过的链接（避免重复打扰）+ 弹窗防重入
+  // 剪贴板监听：上次已提示过的链接（避免重复打扰）
   String? _lastClipboardLink;
-  bool _clipboardDialogOpen = false;
 
   void _addDebug(String s) =>
       setState(() => _debugLogs.insert(0, '${DateTime.now().toLocal().toIso8601String().substring(11, 19)}  $s'));
@@ -50,17 +52,28 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
     _dl = DownloadService(_notif);
     _init();
     _checkClipboard();
+    // 用户点了剪贴板横幅 → 自动填入链接并开始下载
+    widget.pendingLink?.addListener(_onPendingLink);
+  }
+
+  void _onPendingLink() {
+    final link = widget.pendingLink?.value;
+    if (link == null || _working || !mounted) return;
+    widget.pendingLink!.value = null;
+    _linkCtl.text = link;
+    _download();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.pendingLink?.removeListener(_onPendingLink);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 从后台回到前台时检查剪贴板（复制抖音链接 → 自动询问是否下载）
+    // 从后台回到前台时检查剪贴板（复制抖音链接 → 横幅通知提醒）
     if (state == AppLifecycleState.resumed) _checkClipboard();
   }
 
@@ -70,7 +83,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       caseSensitive: false);
 
   Future<void> _checkClipboard() async {
-    if (_working || _clipboardDialogOpen || !mounted) return;
+    if (_working || !mounted) return;
     try {
       final data = await Clipboard.getData('text/plain');
       final text = data?.text ?? '';
@@ -80,27 +93,32 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       if (link == _lastClipboardLink) return;
       _lastClipboardLink = link;
       if (!mounted) return;
-      _clipboardDialogOpen = true;
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('检测到抖音链接'),
-          content: Text(link,
-              maxLines: 3, overflow: TextOverflow.ellipsis),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('忽略')),
-            ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('立即下载')),
-          ],
-        ),
-      );
-      _clipboardDialogOpen = false;
-      if (ok == true && mounted) {
-        _linkCtl.text = link;
-        _download();
+      // 系统级横幅通知（heads-up）：不管 App 在前台还是后台都会从
+      // 屏幕顶部悬浮弹出，点一下就回 App 自动下载。
+      final granted = await _ensureNotifPerm();
+      if (granted) {
+        await showHeadsUp('检测到抖音链接', '点击立即下载', payload: 'clip:$link');
+      } else {
+        // 兜底：没通知权限时退回 App 内弹窗
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('检测到抖音链接'),
+            content: Text(link, maxLines: 3, overflow: TextOverflow.ellipsis),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('忽略')),
+              ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('立即下载')),
+            ],
+          ),
+        );
+        if (ok == true && mounted) {
+          _linkCtl.text = link;
+          _download();
+        }
       }
     } catch (_) {
       // 剪贴板不可用时静默降级
@@ -125,12 +143,14 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 申请通知权限（幂等：已授权则跳过）
-  Future<void> _ensureNotifPerm() async {
+  /// 申请通知权限，返回最终是否已授权
+  Future<bool> _ensureNotifPerm() async {
     final s = await Permission.notification.status;
     if (s.isDenied || s.isRestricted) {
-      await Permission.notification.request();
+      final r = await Permission.notification.request();
+      return r.isGranted;
     }
+    return s.isGranted;
   }
 
   /// 发一条通知（失败/成功/测试结论都走这里，用户无需盯着 App）。

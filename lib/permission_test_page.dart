@@ -45,6 +45,8 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
     _Perm('通知 POST_NOTIFICATIONS', '弹下载进度/结果通知', Permission.notification),
     _Perm('前台服务 FOREGROUND_SERVICE', '下载时后台保活(防杀)', null),
     _Perm('跳过电池优化', '防省电策略杀进程', Permission.ignoreBatteryOptimizations),
+    _Perm('所有文件访问 MANAGE_EXTERNAL_STORAGE', '读取B站缓存目录(需系统设置授予)',
+        Permission.manageExternalStorage),
   ];
 
   @override
