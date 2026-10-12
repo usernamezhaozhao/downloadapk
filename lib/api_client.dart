@@ -4,6 +4,11 @@ import 'package:http/http.dart' as http;
 /// 后端地址（DouK-Downloader，HTTP 明文，已在 manifest 开启 usesCleartextTraffic）
 const String kBaseUrl = 'http://8.152.206.46:5555';
 
+/// 固定测试链接（你指定的那条抖音分享，测试 Cookie / 下载时无需手动粘贴）。
+/// 若用户输入为空，自动回退到这条，做到「懒人一键测」。
+const String kFixedTestLink =
+    '9.48 :5pm X@z.Gv 05/22 sEu:/ 时隔六年，曝光一下我的最新简历！ # AI # 程序员 # 简历 # AI编程 # Java AI 时代的简历应该怎么写？ https://v.douyin.com/h3YNa7rE3II/ 复制此链接，打开Dou音搜索，直接观看视频！';
+
 /// 后端返回的失败分类，用于给用户提示「链接失效」还是「解析失败」
 class ApiException implements Exception {
   final String kind; // 'link_expired' | 'parse_failed' | 'network' | 'unknown'

@@ -33,6 +33,10 @@ class _DouyinPageState extends State<DouyinPage> {
   double _progress = 0;
   bool _working = false;
   List<DownloadItem> _items = [];
+  List<String> _debugLogs = [];
+
+  void _addDebug(String s) =>
+      setState(() => _debugLogs.insert(0, '${DateTime.now().toLocal().toIso8601String().substring(11, 19)}  $s'));
 
   @override
   void initState() {
@@ -49,7 +53,10 @@ class _DouyinPageState extends State<DouyinPage> {
       ));
       await _dl.init();
       _cookieCtl.text = Store.instance.cookie;
-      _testIdCtl.text = Store.instance.testId;
+      // 测试链接优先用已保存的；为空则填你指定的固定测试链接（懒人一键测）
+      _testIdCtl.text = Store.instance.testId.isNotEmpty
+          ? Store.instance.testId
+          : kFixedTestLink;
       _refreshList();
     } catch (e) {
       // 平台层不可用（如测试环境）或插件初始化失败时降级：
@@ -97,9 +104,13 @@ class _DouyinPageState extends State<DouyinPage> {
 
   Future<void> _testCookie() async {
     await _ensureNotifPerm();
+    // 为空时回退到固定测试链接
+    final input = _testIdCtl.text.trim().isEmpty
+        ? kFixedTestLink
+        : _testIdCtl.text.trim();
     setState(() => _cookieTest = '测试中…');
     try {
-      await testCookie(_cookieCtl.text.trim(), _testIdCtl.text.trim());
+      await testCookie(_cookieCtl.text.trim(), input);
       setState(() => _cookieTest = '✅ cookie 有效（能正常取到数据）');
       await _notify('Cookie 测试', '✅ cookie 有效，能正常取到数据');
     } on ApiException catch (e) {
@@ -123,16 +134,16 @@ class _DouyinPageState extends State<DouyinPage> {
   }
 
   Future<void> _download() async {
-    final link = _linkCtl.text.trim();
-    if (link.isEmpty) {
-      setState(() => _status = '请先粘贴抖音分享链接');
-      return;
-    }
+    // 为空时回退到固定测试链接（懒人一键下）
+    final link = _linkCtl.text.trim().isEmpty
+        ? kFixedTestLink
+        : _linkCtl.text.trim();
     await _ensurePerms();
     setState(() {
       _working = true;
       _progress = 0;
       _status = '① 解析分享链接中…';
+      _debugLogs.clear();
     });
     try {
       // 1) 解析分享短链 -> 完整链接
@@ -148,7 +159,11 @@ class _DouyinPageState extends State<DouyinPage> {
       // 4) 解析媒体
       final parsed = parseDetail(data, id);
       setState(() => _status = '③ 下载中…（${parsed.type == 'image' ? '图文' : '视频'}）');
-      // 5) 下载（前端 + 通知双进度）
+      _addDebug('解析结果: type=${parsed.type}, 任务数=${parsed.tasks.length}');
+      if (parsed.type == 'image') {
+        _addDebug('⚠️ 这是图文，图片字段名若解析不出请把后端 JSON 贴我');
+      }
+      // 5) 下载（前端 + 通知双进度 + 调试日志；Cookie 透传给抖音 CDN）
       final paths = await _dl.download(
         tasks: parsed.tasks,
         onProgress: (p, label) => setState(() {
@@ -156,6 +171,8 @@ class _DouyinPageState extends State<DouyinPage> {
           _status = label;
         }),
         album: kAlbum,
+        onLog: _addDebug,
+        cookie: _cookieCtl.text.trim(),
       );
       // 6) 记入本地列表
       final item = DownloadItem(
@@ -273,7 +290,7 @@ class _DouyinPageState extends State<DouyinPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Cookie 设置（给后端 TikTokDownloader 用）',
+                const Text('Cookie 设置（给后端 DouK-Downloader 用，也会透传给抖音 CDN 拉直链）',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 TextField(
@@ -336,6 +353,31 @@ class _DouyinPageState extends State<DouyinPage> {
                   LinearProgressIndicator(value: _progress),
               ],
             ),
+          ),
+        ),
+        // —— 下载调试日志（播放异常时把这里的内容贴给我）——
+        Card(
+          color: Colors.grey[50],
+          child: ExpansionTile(
+            title: const Text('下载调试日志',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('若视频下载完却播不了，展开复制日志发我'),
+            children: [
+              if (_debugLogs.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('暂无日志', style: TextStyle(color: Colors.grey)),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: SelectableText(
+                    _debugLogs.join('\n'),
+                    style: const TextStyle(
+                        fontSize: 11, fontFamily: 'monospace'),
+                  ),
+                ),
+            ],
           ),
         ),
         // —— 本地列表 ——
