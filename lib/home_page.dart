@@ -49,6 +49,7 @@ class _HomePageState extends State<HomePage> {
   String _source = 'douyin'; // 'douyin' | 'bili'
   bool _biliLoading = false;
   bool? _biliPerm; // null=未检查 / true=已授权 / false=缺「所有文件访问」
+  String? _biliError; // B站扫描失败/为空的原因（诊断用）
   List<BiliEntry> _bili = [];
 
   @override
@@ -214,11 +215,17 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _bili = entries;
           _biliPerm = true;
+          _biliError = entries.isEmpty ? BiliCache.lastError : null;
           _biliLoading = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _biliLoading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _biliLoading = false;
+          _biliError = '$e';
+        });
+      }
     }
   }
 
@@ -524,15 +531,21 @@ class _HomePageState extends State<HomePage> {
                 size: 48, color: Colors.grey[400]),
             const SizedBox(height: 12),
             const Text(
-              '读取B站缓存需要「所有文件访问」权限\n（安卓限制，只能到系统设置手动授予）',
+              '读取B站缓存需要「所有文件访问」权限\n'
+              '（安卓限制，/Android/data 只能这样访问）\n\n'
+              '小米路径：设置 → 应用管理 → 本应用\n→ 权限 → 文件访问 → 允许管理所有文件',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
               onPressed: _requestBiliPerm,
               icon: const Icon(Icons.settings),
               label: const Text('去授权'),
+            ),
+            TextButton(
+              onPressed: _loadBili,
+              child: const Text('我已授权，重新检测'),
             ),
           ],
         ),
@@ -556,6 +569,24 @@ class _HomePageState extends State<HomePage> {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
+            if (_query.isEmpty && _biliError != null) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  '诊断：${_biliError!}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.redAccent, fontSize: 11),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: _loadBili,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重新检测'),
+              ),
+            ],
           ],
         ),
       );

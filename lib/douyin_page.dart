@@ -97,7 +97,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       // 屏幕顶部悬浮弹出，点一下就回 App 自动下载。
       final granted = await _ensureNotifPerm();
       if (granted) {
-        await showHeadsUp('检测到抖音链接', '点击立即下载', payload: 'clip:$link');
+        await showHeadsUp('检测到抖音链接', '识别到相关内容，点击立即下载', payload: 'clip:$link');
       } else {
         // 兜底：没通知权限时退回 App 内弹窗
         final ok = await showDialog<bool>(

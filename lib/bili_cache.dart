@@ -41,13 +41,34 @@ class BiliCache {
     }
   }
 
-  /// 扫描全部缓存条目。任何权限/IO 问题都静默降级为空列表。
+  /// 最近一次 scan() 失败/为空的原因（用于界面诊断显示）
+  static String? lastError;
+
+  /// 扫描全部缓存条目。失败原因记录在 [lastError] 供界面展示。
   static Future<List<BiliEntry>> scan() async {
     final out = <BiliEntry>[];
+    lastError = null;
     final root = Directory(rootPath);
     try {
-      if (!await root.exists()) return out;
-      for (final av in root.listSync(followLinks: false)) {
+      bool exists;
+      try {
+        exists = await root.exists();
+      } catch (e) {
+        lastError = '访问目录失败: $e';
+        return out;
+      }
+      if (!exists) {
+        lastError = '缓存目录不存在（B站可能从未缓存过视频，或B站版本改了路径）';
+        return out;
+      }
+      List<FileSystemEntity> top;
+      try {
+        top = root.listSync(followLinks: false);
+      } catch (e) {
+        lastError = '列目录失败（权限可能未真正生效）: $e';
+        return out;
+      }
+      for (final av in top) {
         if (av is! Directory) continue;
         final topLevel = av.path;
         // 在该顶层目录下递归找 entry.json（深度限制 3，防卡死）
@@ -58,8 +79,11 @@ class BiliCache {
           if (e != null) out.add(e);
         }
       }
-    } catch (_) {
-      // 权限不足等异常：返回已扫到的部分
+      if (out.isEmpty && lastError == null) {
+        lastError = '目录存在但没扫到任何 entry.json（共 ${top.length} 项，B站缓存结构可能变动）';
+      }
+    } catch (e) {
+      lastError = '扫描失败: $e';
     }
     out.sort((a, b) => b.bytes.compareTo(a.bytes));
     return out;

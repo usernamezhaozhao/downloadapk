@@ -39,8 +39,8 @@ Future<void> initAppNotif() async {
       ));
 }
 
-/// 发一条 heads-up 横幅通知（自动弹出悬浮显示，点按走 onNotifTap）。
-/// [payload] 建议带 'clip:<链接>' 前缀以区分于下载成功跳转。
+/// 发一条 heads-up 横幅通知（仿抖音顶部横幅：App 大图标 + 展开正文 + 「立即下载」按钮）。
+/// 点通知本体或点按钮都会走 onNotifTap（payload 建议带 'clip:<链接>' 前缀）。
 Future<void> showHeadsUp(String title, String body,
     {String? payload}) async {
   try {
@@ -48,12 +48,22 @@ Future<void> showHeadsUp(String title, String body,
       9001, // 固定 id：同链接新横幅覆盖旧的，不堆积
       title,
       body,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
           'heads_up_channel',
           '剪贴板提醒',
+          channelDescription: '检测到抖音链接时的横幅提醒，点击立即下载',
           importance: Importance.max,
           priority: Priority.high,
+          // 横幅右侧显示 App 图标（仿抖音横幅样式）
+          largeIcon: const DrawableResourceAndroidBitmap('ic_launcher'),
+          // 链接较长时下拉展开显示全文
+          styleInformation: BigTextStyleInformation(body),
+          // 横幅上的「立即下载」按钮，点击后自动收起通知
+          actions: const [
+            AndroidNotificationAction('download_now', '立即下载',
+                cancelNotification: true),
+          ],
         ),
       ),
       payload: payload,
