@@ -520,7 +520,7 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.folder_locked_outlined,
+            Icon(Icons.lock_outlined,
                 size: 48, color: Colors.grey[400]),
             const SizedBox(height: 12),
             const Text(
