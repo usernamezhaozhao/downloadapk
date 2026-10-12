@@ -399,10 +399,61 @@ def patch_kotlin() -> None:
         print("ClipboardProxyActivity.kt already exists, skip")
 
 
+def patch_root_gradle() -> None:
+    """统一所有 Android 子模块的 JVM 目标为 17，消除
+    "Inconsistent JVM Target Compatibility" 编译失败。
+
+    shizuku_api 插件把 Kotlin 编译目标设为 17，但同模块的 Java 编译目标
+    默认仍是 11，AGP 会因此报错：
+        compileDebugJavaWithJavac (11) 和 compileDebugKotlin (17) 不一致
+    在根 build.gradle.kts 里把所有 android 子模块(含插件)的
+    compileOptions 与 kotlinOptions 都拉到 17，从根本上保证一致。
+    CI 的 setup-java 已使用 JDK 17，故 17 是安全目标。
+    """
+    gradle = "android/build.gradle.kts"
+    marker = "// [patch] consistent JVM target 17 for all android subprojects"
+    if not os.path.exists(gradle):
+        print("WARN: %s not found; JVM target NOT patched" % gradle)
+        return
+    with open(gradle, "r", encoding="utf-8") as f:
+        content = f.read()
+    if marker in content:
+        print("root build.gradle.kts already patched for JVM target, skip")
+        return
+
+    block = '''
+
+// [patch] consistent JVM target 17 for all android subprojects
+// 统一所有 Android 子模块的 JVM 目标为 17，消除
+// "Inconsistent JVM Target Compatibility"（shizuku_api 的 Kotlin=17 / Java=11）。
+// CI 使用 JDK 17。
+subprojects {
+    afterEvaluate {
+        if (plugins.hasPlugin("com.android.library") || plugins.hasPlugin("com.android.application")) {
+            android {
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+                kotlinOptions {
+                    jvmTarget = "17"
+                }
+            }
+        }
+    }
+}
+'''
+    content = content.rstrip() + block
+    with open(gradle, "w", encoding="utf-8") as f:
+        f.write(content)
+    print("patched root build.gradle.kts: forced JVM target 17 for all android subprojects")
+
+
 if __name__ == "__main__":
     patch_manifest()
     patch_build_gradle()
     patch_min_sdk()
     write_file_paths()
     patch_kotlin()
-    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + shizuku provider + minSdk24 + clipboard proxy activity")
+    patch_root_gradle()
+    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + shizuku provider + minSdk24 + clipboard proxy activity + JVM target 17")
