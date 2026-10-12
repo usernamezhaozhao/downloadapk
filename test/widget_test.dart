@@ -34,15 +34,23 @@ void main() {
     expect(find.text('Hello Bilibili'), findsOneWidget);
   });
 
-  testWidgets('home shows three tabs: 抖音 / B站 / 测试', (tester) async {
+  testWidgets('home shows three tabs: 首页 / 抖音 / 测试', (tester) async {
     await tester.pumpWidget(const MyApp());
     // Give the async init (fully mocked above, and degradable inside the
     // app itself) a chance to run its microtasks.
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.text('首页'), findsOneWidget);
     expect(find.text('抖音'), findsOneWidget);
-    expect(find.text('B站'), findsOneWidget);
     expect(find.text('测试'), findsOneWidget);
+  });
+
+  testWidgets('home page shows empty cache state', (tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 首页（默认 Tab）：无下载记录时展示空态引导
+    expect(find.textContaining('还没有下载记录'), findsOneWidget);
   });
 }

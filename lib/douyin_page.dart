@@ -1,10 +1,8 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:gal/gal.dart';
-import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:video_player/video_player.dart';
 
 import 'api_client.dart';
 import 'download_service.dart';
@@ -21,67 +19,7 @@ class DouyinPage extends StatefulWidget {
   State<DouyinPage> createState() => _DouyinPageState();
 }
 
-/// App 内嵌视频播放器：用于预览弹窗里直接播放，无需跳出系统播放器。
-class _VideoPreview extends StatefulWidget {
-  final String path;
-  const _VideoPreview(this.path);
-
-  @override
-  State<_VideoPreview> createState() => _VideoPreviewState();
-}
-
-class _VideoPreviewState extends State<_VideoPreview> {
-  late final VideoPlayerController _c;
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _c = VideoPlayerController.file(File(widget.path))
-      ..initialize().then((_) {
-        if (mounted) setState(() => _ready = true);
-      }).catchError((e) {
-        if (mounted) setState(() => _ready = false);
-      });
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_ready) {
-      return const SizedBox(
-        height: 200,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    return AspectRatio(
-      aspectRatio: _c.value.aspectRatio,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          VideoPlayer(_c),
-          IconButton(
-            iconSize: 56,
-            color: Colors.white,
-            icon: Icon(_c.value.isPlaying
-                ? Icons.pause_circle_filled
-                : Icons.play_circle_fill),
-            onPressed: () => setState(() {
-              _c.value.isPlaying ? _c.pause() : _c.play();
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DouyinPageState extends State<DouyinPage> {
+class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   final _cookieCtl = TextEditingController();
   final _testIdCtl = TextEditingController();
   final _linkCtl = TextEditingController();
@@ -96,8 +34,11 @@ class _DouyinPageState extends State<DouyinPage> {
   bool _working = false;
   bool _withCover = true; // 同时下载封面
   String? _coverUrl; // 解析出的远程封面（预览用）
-  List<DownloadItem> _items = [];
   List<String> _debugLogs = [];
+
+  // 剪贴板监听：上次已提示过的链接（避免重复打扰）+ 弹窗防重入
+  String? _lastClipboardLink;
+  bool _clipboardDialogOpen = false;
 
   void _addDebug(String s) =>
       setState(() => _debugLogs.insert(0, '${DateTime.now().toLocal().toIso8601String().substring(11, 19)}  $s'));
@@ -105,8 +46,65 @@ class _DouyinPageState extends State<DouyinPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _dl = DownloadService(_notif);
     _init();
+    _checkClipboard();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 从后台回到前台时检查剪贴板（复制抖音链接 → 自动询问是否下载）
+    if (state == AppLifecycleState.resumed) _checkClipboard();
+  }
+
+  /// 匹配抖音链接（含 v.douyin.com 短链）
+  static final RegExp _douyinLink = RegExp(
+      r'https?://[^\s]*douyin\.com/[^\s]+',
+      caseSensitive: false);
+
+  Future<void> _checkClipboard() async {
+    if (_working || _clipboardDialogOpen || !mounted) return;
+    try {
+      final data = await Clipboard.getData('text/plain');
+      final text = data?.text ?? '';
+      final m = _douyinLink.firstMatch(text);
+      if (m == null) return;
+      final link = m.group(0)!;
+      if (link == _lastClipboardLink) return;
+      _lastClipboardLink = link;
+      if (!mounted) return;
+      _clipboardDialogOpen = true;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('检测到抖音链接'),
+          content: Text(link,
+              maxLines: 3, overflow: TextOverflow.ellipsis),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('忽略')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('立即下载')),
+          ],
+        ),
+      );
+      _clipboardDialogOpen = false;
+      if (ok == true && mounted) {
+        _linkCtl.text = link;
+        _download();
+      }
+    } catch (_) {
+      // 剪贴板不可用时静默降级
+    }
   }
 
   Future<void> _init() async {
@@ -121,7 +119,6 @@ class _DouyinPageState extends State<DouyinPage> {
       _testIdCtl.text = Store.instance.testId.isNotEmpty
           ? Store.instance.testId
           : kFixedTestLink;
-      _refreshList();
     } catch (e) {
       // 平台层不可用（如测试环境）或插件初始化失败时降级：
       // App 仍可浏览/输入，只是通知与持久化可能受限。
@@ -129,8 +126,6 @@ class _DouyinPageState extends State<DouyinPage> {
       if (mounted) setState(() => _status = '初始化降级（通知/存储可能受限）');
     }
   }
-
-  void _refreshList() => setState(() => _items = Store.instance.items.toList());
 
   /// 申请通知权限（幂等：已授权则跳过）
   Future<void> _ensureNotifPerm() async {
@@ -271,7 +266,6 @@ class _DouyinPageState extends State<DouyinPage> {
         cover: parsed.cover,
       );
       await Store.instance.addItem(item);
-      _refreshList();
       setState(() {
         _progress = 1;
         _status = '✅ 下载完成，已存入相册「$kAlbum」';
@@ -293,88 +287,6 @@ class _DouyinPageState extends State<DouyinPage> {
     } finally {
       setState(() => _working = false);
     }
-  }
-
-  Future<void> _open(DownloadItem item) async {
-    if (item.paths.isEmpty) return;
-    try {
-      await OpenFilex.open(item.paths.first);
-    } catch (e) {
-      setState(() => _status = '打开失败: $e');
-    }
-  }
-
-  void _preview(DownloadItem item) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(item.title),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (item.coverPath != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Image.file(File(item.coverPath!), height: 120, fit: BoxFit.cover),
-                )
-              else if (item.cover != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Image.network(item.cover!, height: 120, fit: BoxFit.cover),
-                ),
-              if (item.type == 'image')
-                ...item.paths.map((p) => Image.file(File(p))).toList()
-              else
-                _VideoPreview(item.paths.first),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _open(item);
-            },
-            child: const Text('用系统播放器打开'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _itemCard(DownloadItem it) {
-    final cover = it.coverPath ?? it.cover;
-    final coverIsLocal = it.coverPath != null;
-    return Card(
-      child: ListTile(
-        leading: cover != null
-            ? (coverIsLocal
-                ? Image.file(File(cover), width: 48, height: 48, fit: BoxFit.cover)
-                : Image.network(cover, width: 48, height: 48, fit: BoxFit.cover))
-            : const Icon(Icons.file_present),
-        title: Text(it.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text('${it.type == 'image' ? '图文' : '视频'} · ${it.paths.length} 个文件'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.visibility),
-              onPressed: () => _preview(it),
-            ),
-            IconButton(
-              icon: const Icon(Icons.play_arrow),
-              onPressed: () => _open(it),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -479,6 +391,26 @@ class _DouyinPageState extends State<DouyinPage> {
             ),
           ),
         ),
+        // —— B 站说明（规划中）——
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('B 站（规划中）',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 6),
+                Text(
+                  '后续将直接读取 B 站 App 的缓存路径：B 站负责下载，'
+                  '本应用读取其缓存目录，实现播放与管理，'
+                  '届时 B 站不再单独开 Tab。',
+                  style: TextStyle(fontSize: 13, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+        ),
         // —— 下载调试日志（播放异常时把这里的内容贴给我）——
         Card(
           color: Colors.grey[50],
@@ -504,13 +436,6 @@ class _DouyinPageState extends State<DouyinPage> {
             ],
           ),
         ),
-        // —— 本地列表 ——
-        const Text('本地列表（点预览 / 播放）',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        if (_items.isEmpty)
-          const Text('还没有下载记录', style: TextStyle(color: Colors.grey)),
-        ..._items.map(_itemCard),
       ],
     );
   }

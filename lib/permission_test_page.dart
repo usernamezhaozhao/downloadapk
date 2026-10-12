@@ -56,6 +56,8 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
       if (p.permission != null) {
         p.permission!.status.then((s) {
           if (mounted) setState(() => _status[p.permission!] = s);
+        }).catchError((_) {
+          // 平台插件不可用（如测试环境）时静默降级，状态保持「…」
         });
       }
     }

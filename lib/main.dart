@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'bilibili_page.dart';
+
 import 'douyin_page.dart';
+import 'home_page.dart';
 import 'permission_test_page.dart';
 
 void main() => runApp(const MyApp());
@@ -30,11 +31,14 @@ class HomeTabs extends StatefulWidget {
 class _HomeTabsState extends State<HomeTabs> {
   int _idx = 0;
   DateTime? _lastBack;
-  final List<Widget> _pages = const [
-    DouyinPage(),
-    BilibiliPage(),
-    PermissionTestPage(),
-  ];
+  // 每次切 Tab 递增，首页监听它在返回时刷新缓存列表
+  final ValueNotifier<int> _tabSignal = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _tabSignal.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,14 +62,25 @@ class _HomeTabsState extends State<HomeTabs> {
       },
       child: Scaffold(
         appBar: AppBar(title: const Text('抖音下载器')),
-        body: _pages[_idx],
+        // IndexedStack：保活三个页面（切 Tab 不丢输入/下载进度），首页返回时经 _tabSignal 刷新
+        body: IndexedStack(
+          index: _idx,
+          children: [
+            HomePage(refreshSignal: _tabSignal),
+            const DouyinPage(),
+            const PermissionTestPage(),
+          ],
+        ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _idx,
-          onDestinationSelected: (i) => setState(() => _idx = i),
+          onDestinationSelected: (i) {
+            setState(() => _idx = i);
+            _tabSignal.value++;
+          },
           destinations: const [
+            NavigationDestination(icon: Icon(Icons.home_outlined), label: '首页'),
             NavigationDestination(
                 icon: Icon(Icons.download_for_offline), label: '抖音'),
-            NavigationDestination(icon: Icon(Icons.tv), label: 'B站'),
             NavigationDestination(
                 icon: Icon(Icons.verified_user), label: '测试'),
           ],
