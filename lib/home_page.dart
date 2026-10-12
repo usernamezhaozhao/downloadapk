@@ -101,7 +101,34 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _load() async {
-    // 1) 剩余空间（失败静默降级为只显示已使用）
+    // 1) 读取下载记录（优先，确保列表/空态不依赖下面的磁盘查询）
+    try {
+      await Store.instance.init();
+    } catch (_) {}
+    final records = Store.instance.items.toList();
+
+    // 2) 统计每个文件大小（缺失文件计 0）
+    final sizes = <String, int>{};
+    for (final r in records) {
+      for (final p in r.paths) {
+        if (sizes.containsKey(p)) continue;
+        try {
+          sizes[p] = File(p).lengthSync();
+        } catch (_) {
+          sizes[p] = 0;
+        }
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _records = records;
+        _sizes = sizes;
+        _loaded = true; // 先让列表/空态出来，不阻塞在磁盘查询上
+      });
+      _tryOpenPending();
+    }
+
+    // 3) 剩余空间（失败静默降级为只显示已使用，绝不阻塞列表）
     int? free;
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -118,33 +145,6 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (_) {}
     if (mounted) setState(() => _freeBytes = free);
-
-    // 2) 读取下载记录
-    try {
-      await Store.instance.init();
-    } catch (_) {}
-    final records = Store.instance.items.toList();
-
-    // 3) 统计每个文件大小（缺失文件计 0）
-    final sizes = <String, int>{};
-    for (final r in records) {
-      for (final p in r.paths) {
-        if (sizes.containsKey(p)) continue;
-        try {
-          sizes[p] = File(p).lengthSync();
-        } catch (_) {
-          sizes[p] = 0;
-        }
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _records = records;
-        _sizes = sizes;
-        _loaded = true;
-      });
-      _tryOpenPending();
-    }
   }
 
   /// 所有作品归组（不做搜索过滤），供「通知点击自动预览」查找

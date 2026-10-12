@@ -48,7 +48,8 @@ void main() {
 
   testWidgets('home page shows empty cache state', (tester) async {
     await tester.pumpWidget(const MyApp());
-    await tester.pump(const Duration(milliseconds: 200));
+    // 等待首页异步加载（读下载记录 -> 渲染空态），进度圈消失后稳定
+    await tester.pumpAndSettle();
 
     // 首页（默认 Tab）：无下载记录时展示空态引导
     expect(find.textContaining('还没有下载记录'), findsOneWidget);
