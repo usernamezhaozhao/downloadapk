@@ -72,3 +72,12 @@ Future<void> showHeadsUp(String title, String body,
     // 通知权限未授予等场景静默失败
   }
 }
+
+/// 剪贴板横幅专用封装：把「即将下载的链接」显示出来（若已解析出视频标题
+/// 则把标题作为通知标题），点了「立即下载」才真正开始下载。固定 id 9001，
+/// 同一条链接新横幅会覆盖旧横幅，不堆积。
+Future<void> showLinkHeadsUp(String link, {String? title}) async {
+  final display = link.length > 90 ? '${link.substring(0, 90)}…' : link;
+  final body = '即将下载：\n$display\n\n点击「立即下载」开始';
+  await showHeadsUp(title ?? '检测到抖音链接', body, payload: 'clip:$link');
+}

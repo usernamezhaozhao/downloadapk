@@ -111,12 +111,17 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       // 所以下面再用 App 内顶部横幅兜底，保证一定能看见、点了就下载。
       final granted = await _ensureNotifPerm();
       if (granted) {
-        await showHeadsUp('检测到抖音链接', '识别到相关内容，点击立即下载', payload: 'clip:$link');
+        // 先立即显示链接；解析出视频标题后再覆盖更新，点击前就知道要下的是什么
+        await showLinkHeadsUp(link);
+        fetchDouyinTitle(link).then((t) {
+          if (t != null && mounted) showLinkHeadsUp(link, title: t);
+        });
       }
-      // App 内顶部横幅（兜底，始终可见可点）
+      // App 内顶部横幅（兜底，始终可见可点），直接把链接展示出来
+      final short = link.length > 60 ? '${link.substring(0, 60)}…' : link;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('检测到抖音链接，是否立即下载？'),
+          content: Text('检测到抖音链接：$short\n是否立即下载？'),
           duration: const Duration(seconds: 6),
           action: SnackBarAction(
             label: '立即下载',

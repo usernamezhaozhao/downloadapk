@@ -88,6 +88,26 @@ Future<Map<String, dynamic>> fetchDetail(String detailId, String cookie) async {
   return {'raw': data};
 }
 
+/// 仅取视频标题（用于剪贴板横幅提示「即将下载的是什么」）。
+/// 失败/超时返回 null，调用方会回退为显示原始链接。
+/// 这是下载流程第一步本来就需要的解析，拿到标题后在横幅里展示给用户看，
+/// 让用户点击「立即下载」前就知道要下的是什么。
+Future<String?> fetchDouyinTitle(String link) async {
+  try {
+    final url = await resolveShare(link).timeout(const Duration(seconds: 20));
+    final id = extractDetailId(url);
+    if (id == null) return null;
+    // 公开作品一般无需 cookie 即可拿到标题；失败则回退显示链接
+    final data =
+        await fetchDetail(id, '').timeout(const Duration(seconds: 20));
+    final desc = data['desc'];
+    if (desc is String && desc.trim().isNotEmpty) return desc.trim();
+  } catch (_) {
+    // 解析失败不影响「提示+下载」主流程，横幅回退显示链接
+  }
+  return null;
+}
+
 /// 测试 cookie 是否有效：支持粘贴「分享链接」或「数字作品ID」两种输入。
 /// 链接会先走 /douyin/share 解析出作品ID，再调 /douyin/detail；
 /// 能返回数据说明 cookie 有效；返回鉴权错误说明 cookie 失效/过期。

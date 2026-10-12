@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import 'api_client.dart';
 import 'douyin_page.dart';
 import 'home_page.dart';
 import 'notif_service.dart';
@@ -101,11 +102,15 @@ class _HomeTabsState extends State<HomeTabs> {
     FlutterForegroundTask.addTaskDataCallback(_onClipboardLink);
   }
 
-  /// 前台服务把检测到的抖音链接发回来，这里弹系统横幅（与通知点击同款体验）
+  /// 前台服务把检测到的抖音链接发回来，这里弹系统横幅（与通知点击同款体验）。
+  /// 先立即显示链接，再异步解析出标题覆盖更新，让用户点击「立即下载」前
+  /// 就知道即将下的是什么（点了才真正开始下载，不会自动下）。
   void _onClipboardLink(dynamic data) {
     if (data is! String || data.isEmpty || !mounted) return;
-    showHeadsUp('检测到抖音链接', '识别到相关内容，点击立即下载',
-        payload: 'clip:$data');
+    showLinkHeadsUp(data);
+    fetchDouyinTitle(data).then((t) {
+      if (t != null && mounted) showLinkHeadsUp(data, title: t);
+    });
   }
 
   /// 统一分发通知点击：'clip:<链接>' → 抖音页自动下载；其余 → 首页预览
