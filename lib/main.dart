@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'douyin_page.dart';
 import 'home_page.dart';
+import 'notif_service.dart';
 import 'permission_test_page.dart';
 
 void main() => runApp(const MyApp());
@@ -33,10 +34,24 @@ class _HomeTabsState extends State<HomeTabs> {
   DateTime? _lastBack;
   // 每次切 Tab 递增，首页监听它在返回时刷新缓存列表
   final ValueNotifier<int> _tabSignal = ValueNotifier<int>(0);
+  // 通知被点击（携带作品 id）时，首页据此自动打开预览
+  final ValueNotifier<String?> _pendingPreview = ValueNotifier<String?>(null);
+
+  @override
+  void initState() {
+    super.initState();
+    initAppNotif();
+    // 通知点击：跳到首页并让首页打开对应作品预览
+    onNotifTap = (payload) {
+      if (payload != null) _pendingPreview.value = payload;
+      setState(() => _idx = 0);
+    };
+  }
 
   @override
   void dispose() {
     _tabSignal.dispose();
+    _pendingPreview.dispose();
     super.dispose();
   }
 
@@ -66,7 +81,10 @@ class _HomeTabsState extends State<HomeTabs> {
         body: IndexedStack(
           index: _idx,
           children: [
-            HomePage(refreshSignal: _tabSignal),
+            HomePage(
+              refreshSignal: _tabSignal,
+              pendingPreview: _pendingPreview,
+            ),
             const DouyinPage(),
             const PermissionTestPage(),
           ],

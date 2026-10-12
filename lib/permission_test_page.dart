@@ -9,6 +9,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'notif_service.dart';
+
 /// 后端健康接口（HTTP 明文，用于验证 INTERNET + 明文流量是否可用）
 const String _backendToken = 'http://8.152.206.46:5555/token';
 
@@ -20,9 +22,6 @@ class PermissionTestPage extends StatefulWidget {
 }
 
 class _PermissionTestPageState extends State<PermissionTestPage> {
-  final FlutterLocalNotificationsPlugin _notif =
-      FlutterLocalNotificationsPlugin();
-
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'test_channel',
     '权限测试通知',
@@ -51,7 +50,11 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
   @override
   void initState() {
     super.initState();
-    _initNotif();
+    // 通知插件已由 notif_service.initAppNotif() 统一初始化，这里只建测试通道
+    appNotif
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
     for (final p in _perms) {
       if (p.permission != null) {
         p.permission!.status.then((s) {
@@ -61,16 +64,6 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
         });
       }
     }
-  }
-
-  Future<void> _initNotif() async {
-    await _notif
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
-    await _notif.initialize(const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    ));
   }
 
   void _addLog(String s) => setState(() => _log.insert(0, s));
@@ -123,7 +116,7 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
       }
       await sink.close();
 
-      await _notif.show(
+      await appNotif.show(
         1,
         '下载成功',
         'song.mp4 已保存，准备调用播放器',

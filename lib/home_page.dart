@@ -5,6 +5,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
+import 'notif_service.dart';
 import 'store.dart';
 import 'video_preview.dart';
 
@@ -13,8 +14,10 @@ import 'video_preview.dart';
 class HomePage extends StatefulWidget {
   /// 主页 Tab 每次切换时递增，用于返回首页时刷新缓存列表
   final ValueNotifier<int>? refreshSignal;
+  /// 通知被点击（携带作品 id）时，自动跳到首页并打开该作品预览
+  final ValueNotifier<String?>? pendingPreview;
 
-  const HomePage({super.key, this.refreshSignal});
+  const HomePage({super.key, this.refreshSignal, this.pendingPreview});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -38,21 +41,62 @@ class _HomePageState extends State<HomePage> {
   List<DownloadItem> _records = [];
   Map<String, int> _sizes = {}; // 文件路径 -> 字节数
   int? _freeBytes; // 设备剩余空间（df 取不到则为 null）
+  String? _pendingId; // 通知点击后要自动打开预览的作品 id
 
   @override
   void initState() {
     super.initState();
     widget.refreshSignal?.addListener(_onSignal);
+    widget.pendingPreview?.addListener(_onPending);
     _load();
+    // 冷启动（从通知点击直接拉起 App）的情况走这里
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkLaunchFromNotif());
   }
 
   void _onSignal() {
     if (mounted) _load();
   }
 
+  void _onPending() {
+    final id = widget.pendingPreview?.value;
+    if (id == null) return;
+    widget.pendingPreview!.value = null;
+    _pendingId = id;
+    if (_loaded) _tryOpenPending();
+  }
+
+  /// 处理「点击通知启动 App」的场景（应用被杀后从通知拉起）
+  Future<void> _checkLaunchFromNotif() async {
+    try {
+      final d = await appNotif.getNotificationAppLaunchDetails();
+      final p = d?.notificationResponse?.payload;
+      if (p != null) {
+        _pendingId = p;
+        if (_loaded) _tryOpenPending();
+      }
+    } catch (_) {
+      // 插件不可用（如测试环境）时忽略
+    }
+  }
+
+  void _tryOpenPending() {
+    final id = _pendingId;
+    if (id == null || !mounted) return;
+    for (final g in _allGroups()) {
+      if (g.id == id) {
+        _pendingId = null;
+        _preview(g);
+        return;
+      }
+    }
+    // 列表里还没这个作品（极端情况）就清掉，避免反复弹
+    _pendingId = null;
+  }
+
   @override
   void dispose() {
     widget.refreshSignal?.removeListener(_onSignal);
+    widget.pendingPreview?.removeListener(_onPending);
     super.dispose();
   }
 
@@ -99,10 +143,12 @@ class _HomePageState extends State<HomePage> {
         _sizes = sizes;
         _loaded = true;
       });
+      _tryOpenPending();
     }
   }
 
-  List<_Group> _grouped() {
+  /// 所有作品归组（不做搜索过滤），供「通知点击自动预览」查找
+  List<_Group> _allGroups() {
     final map = <String, _Group>{};
     for (final r in _records) {
       final g = map.putIfAbsent(r.id,
@@ -111,11 +157,14 @@ class _HomePageState extends State<HomePage> {
         if (!g.paths.contains(p)) g.paths.add(p);
       }
     }
+    return map.values.toList();
+  }
+
+  List<_Group> _grouped() {
+    final groups = _allGroups();
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return map.values.toList();
-    return map.values
-        .where((g) => g.title.toLowerCase().contains(q))
-        .toList();
+    if (q.isEmpty) return groups;
+    return groups.where((g) => g.title.toLowerCase().contains(q)).toList();
   }
 
   int _groupSize(_Group g) =>

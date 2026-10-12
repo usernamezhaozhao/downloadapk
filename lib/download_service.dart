@@ -94,21 +94,11 @@ class DownloadService {
       onProgress(done / tasks.length, '已完成 $done/${tasks.length}');
     }
 
-    await notif.show(
-      notifId,
-      '下载完成',
-      '已保存 ${results.length} 个文件',
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          channelId,
-          channelName,
-          importance: Importance.high,
-          progress: 100,
-          maxProgress: 100,
-          showProgress: false,
-        ),
-      ),
-    );
+    // 下载完成：取消「进行中」的常驻进度通知，成功/失败通知由调用方（抖音页）统一发出并携带 payload
+    try {
+      await notif.cancel(notifId);
+    } catch (_) {}
+
     return results;
   }
 

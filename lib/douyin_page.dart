@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'api_client.dart';
 import 'download_service.dart';
 import 'models.dart';
+import 'notif_service.dart';
 import 'parser.dart';
 import 'store.dart';
 
@@ -24,8 +25,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   final _testIdCtl = TextEditingController();
   final _linkCtl = TextEditingController();
 
-  final FlutterLocalNotificationsPlugin _notif =
-      FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notif = appNotif;
   late final DownloadService _dl;
 
   String _status = '就绪';
@@ -110,9 +110,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   Future<void> _init() async {
     try {
       await Store.instance.init();
-      await _notif.initialize(const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      ));
+      // 通知插件由 notif_service.initAppNotif() 统一初始化（含点击回调）。
       await _dl.init();
       _cookieCtl.text = Store.instance.cookie;
       // 测试链接优先用已保存的；为空则填你指定的固定测试链接（懒人一键测）
@@ -135,8 +133,9 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 发一条普通通知（失败/成功/测试结论都走这里，用户无需盯着 App）
-  Future<void> _notify(String title, String body) async {
+  /// 发一条通知（失败/成功/测试结论都走这里，用户无需盯着 App）。
+  /// [payload] 携带作品 id，点击通知即可跳转 App 内部观看。
+  Future<void> _notify(String title, String body, [String? payload]) async {
     try {
       await _notif.show(
         DateTime.now().millisecondsSinceEpoch % 100000,
@@ -149,6 +148,7 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
             importance: Importance.high,
           ),
         ),
+        payload: payload,
       );
     } catch (_) {
       // 通知权限未授予时静默失败，不影响主流程
@@ -270,8 +270,10 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
         _progress = 1;
         _status = '✅ 下载完成，已存入相册「$kAlbum」';
       });
-      await _notify('抖音下载完成',
-          '已保存${parsed.type == 'image' ? '图文' : '视频'}到相册「$kAlbum」');
+      await _notify(
+          '下载成功',
+          '✅ ${parsed.type == 'image' ? '图文' : '视频'}已下载完成，点击进入 App 观看',
+          id);
       _linkCtl.clear();
     } on ApiException catch (e) {
       final hint = e.kind == 'link_expired'
