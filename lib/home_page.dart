@@ -85,8 +85,10 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _load() async {
     // 1) 读取下载记录（优先，确保列表/空态不依赖下面的磁盘查询）
+    //    force: 通知上的「后台下载」在另一个 isolate 里写数据，
+    //    回 App 时强制刷新，刚下好的作品才会立刻出现在列表里。
     try {
-      await Store.instance.init();
+      await Store.instance.init(force: true);
     } catch (_) {}
     final records = Store.instance.items.toList();
 

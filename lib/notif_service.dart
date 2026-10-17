@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:ui' show DartPluginRegistrant;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import 'bg_download.dart';
 
 /// 全局唯一的通知插件实例与点击处理器。
 /// 所有页面共用它，避免多个实例互相覆盖 onDidReceiveNotificationResponse 回调。
@@ -22,12 +27,31 @@ const String kChannelProgress = 'download_channel'; // 下载进度条：静默
 const String kChannelResult = 'result_channel_v1'; // 下载结果：high
 const String kChannelBanner = 'banner_v1'; // 剪贴板横幅：max
 
+/// 通知动作「后台下载」的入口（App 不需要到前台）。
+///
+/// 必须是**顶层函数**并带 `@pragma('vm:entry-point')`：系统在 App 没运行时
+/// 也要能找到这个入口来启动后台 isolate。
+@pragma('vm:entry-point')
+void backgroundActionEntry(NotificationResponse response) {
+  // 后台 isolate 是全新的引擎，没有主 isolate 的插件注册；
+  // 不注册的话 path_provider / gal / shared_preferences 全部不可用。
+  DartPluginRegistrant.ensureInitialized();
+  unawaited(() async {
+    if (response.actionId != 'download_bg') return;
+    final p = response.payload;
+    if (p == null || !p.startsWith('clip:')) return;
+    await runBackgroundDownload(p.substring(5));
+  }());
+}
+
 Future<void> initAppNotif() async {
   await appNotif.initialize(
     const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     ),
     onDidReceiveNotificationResponse: (resp) => onNotifTap?.call(resp.payload),
+    // 「后台下载」按钮：走后台广播 → 后台 isolate 里下载，不打开界面
+    onDidReceiveBackgroundNotificationResponse: backgroundActionEntry,
   );
   final android = appNotif.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
@@ -86,8 +110,12 @@ Future<bool> showHeadsUp(
           // 置 true 后系统会直接把 App 拉到前台，走正常的通知点击回调，
           // 于是用户能立刻看到 App 里开始下载。
           actions: const [
+            // 打开 App 下载（走正常通知点击回调，用户能看见进度）
             AndroidNotificationAction('download_now', '立即下载',
                 cancelNotification: true, showsUserInterface: true),
+            // 静默后台下载（走后台广播 + 后台 isolate，不打开界面）
+            AndroidNotificationAction('download_bg', '后台下载',
+                cancelNotification: true),
           ],
         ),
       ),
@@ -106,7 +134,8 @@ Future<bool> showHeadsUp(
 /// 固定 id 9001：同一条链接的新横幅覆盖旧的，不堆积。
 Future<bool> showLinkHeadsUp(String link, {String? title}) {
   final display = link.length > 90 ? '${link.substring(0, 90)}…' : link;
-  final body = '即将下载：\n$display\n\n点击「立即下载」开始';
+  final body = '即将下载：\n$display\n\n'
+      '「立即下载」打开 App 下载；「后台下载」静默保存，不打扰你';
   return showHeadsUp(title ?? '检测到抖音链接', body, payload: 'clip:$link');
 }
 

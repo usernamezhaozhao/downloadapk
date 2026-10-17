@@ -23,7 +23,13 @@ class DownloadService {
       'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
   final FlutterLocalNotificationsPlugin notif;
-  DownloadService(this.notif);
+
+  /// quiet=true 时不发自身的进度通知。
+  /// 后台 isolate（通知上的「后台下载」）里用它：那边没有主 isolate 的插件状态，
+  /// 让调用方统一发少量通知更稳，避免后台进度回调里的异常打断下载。
+  final bool quiet;
+
+  DownloadService(this.notif, {this.quiet = false});
 
   Future<void> init() async {
     await notif
@@ -295,6 +301,7 @@ class DownloadService {
       m.startsWith('MPEG-TS');
 
   void _showProgress(double p, String title) {
+    if (quiet) return;
     notif.show(
       notifId,
       title,
