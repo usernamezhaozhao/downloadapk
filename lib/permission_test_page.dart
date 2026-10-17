@@ -9,6 +9,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'bg_log.dart';
 import 'notif_service.dart';
 
 /// 后端健康接口（HTTP 明文，用于验证 INTERNET + 明文流量是否可用）
@@ -179,6 +180,19 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
     }
   }
 
+  /// 后台下载日志（写在 App 缓存目录，主/后台 isolate 共用）
+  String _bgLogText = '';
+
+  Future<void> _loadBgLog() async {
+    final text = await readBgLog();
+    if (mounted) setState(() => _bgLogText = text);
+  }
+
+  Future<void> _clearBgLog() async {
+    await clearBgLog();
+    if (mounted) setState(() => _bgLogText = '（已清空）');
+  }
+
   Widget _permRow(_Perm p) {
     final isNormal = p.permission == null;
     return ListTile(
@@ -262,7 +276,43 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
         ),
         Text('结果: $_proxyResult'),
         const Divider(),
-        const Text('五、操作日志', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('五、后台下载日志（点横幅上「后台下载」没反应时看这里）',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 6),
+          child: Text(
+            '「后台下载」跑在一个全新的后台 isolate 里，看不到界面。它每一步都会写进 '
+            'App 缓存目录的 bg_download.log，这里直接读出来——'
+            '如果日志是空的，说明通知动作根本没到 App（插件那边没起来）。',
+            style: TextStyle(fontSize: 11, color: Colors.black54),
+          ),
+        ),
+        Row(
+          children: [
+            ElevatedButton(
+              onPressed: _loadBgLog,
+              child: const Text('刷新后台日志'),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _clearBgLog,
+              child: const Text('清空'),
+            ),
+          ],
+        ),
+        if (_bgLogText.isNotEmpty)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.all(8),
+            color: const Color(0xFFF6F6F8),
+            child: SelectableText(
+              _bgLogText,
+              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            ),
+          ),
+        const Divider(),
+        const Text('六、操作日志', style: TextStyle(fontWeight: FontWeight.bold)),
         ..._log.map((e) => Text('• $e', style: const TextStyle(fontSize: 12))),
       ],
     );

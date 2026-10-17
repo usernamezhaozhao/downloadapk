@@ -1,7 +1,7 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_client.dart';
+import 'bg_log.dart';
 import 'download_service.dart';
 import 'models.dart';
 import 'notif_service.dart';
@@ -13,21 +13,28 @@ import 'store.dart';
 ///
 /// 为什么能这么干：这条路径用的是通知动作的「后台广播」通道（
 /// `showsUserInterface: false`），系统只启动一个后台 isolate，不会显示界面。
-/// 入口见 [notif_service.backgroundActionEntry]（它负责先注册插件）。
+/// 入口见 [notif_service.backgroundActionEntry]（它负责 binding + 插件注册）。
+///
+/// 每一步都通过 [bgLog] 落盘，失败时「测试」页能看到具体卡在哪一步。
 Future<void> runBackgroundDownload(String link) async {
   const album = '抖音下载';
   try {
-    // 用低优先级通知打个招呼：App 不会打开，但通知栏能看到「正在后台下载」
+    await bgLog('开始后台下载: $link');
     await _notify('正在后台下载…', _short(link), id: 200, alert: false);
-    // 后台 isolate 读到的列表可能是旧的，force 刷新一次再合并新记录
+
     await Store.instance.init(force: true);
     final cookie = Store.instance.cookie;
+    await bgLog('本地记录已加载，cookie ${cookie.isEmpty ? '为空' : '已就绪(长度 ${cookie.length})'}');
 
     final url = await resolveShare(link);
+    await bgLog('短链解析完成: $url');
     final id = extractDetailId(url);
     if (id == null) throw Exception('无法从链接提取作品ID：$url');
+
     final data = await fetchDetail(id, cookie);
     final parsed = parseDetail(data, id);
+    await bgLog('取到数据: type=${parsed.type} 任务数=${parsed.tasks.length} '
+        '标题=${parsed.title}');
 
     // quiet: 后台不维护进度条，避免后台 isolate 里的通知调用异常打断下载
     final svc = DownloadService(appNotif, quiet: true);
@@ -35,13 +42,15 @@ Future<void> runBackgroundDownload(String link) async {
       tasks: parsed.tasks,
       onProgress: (_, __) {},
       album: album,
-      onLog: (_) {},
+      onLog: (msg) => bgLog('  · $msg'),
       cookie: cookie,
     );
+    await bgLog('下载完成，文件 ${paths.length} 个: $paths');
 
     String? coverPath;
     if (parsed.cover != null) {
       coverPath = await svc.downloadCover(parsed.cover!, cookie, (_) {});
+      await bgLog('封面: ${coverPath ?? '下载失败（不影响正片）'}');
     }
 
     await Store.instance.addItem(DownloadItem(
@@ -53,8 +62,10 @@ Future<void> runBackgroundDownload(String link) async {
       coverPath: coverPath,
       cover: parsed.cover,
     ));
+    await bgLog('已写入本地列表，标题: ${parsed.title}');
     await _notify('后台下载完成', '${parsed.title}\n已保存到相册「$album」', id: 200);
-  } catch (e) {
+  } catch (e, st) {
+    await bgLog('后台下载失败: $e\n$st');
     await _notify('后台下载失败', '$e', id: 200);
   }
 }
@@ -84,8 +95,9 @@ Future<void> _notify(String title, String body,
         ),
       ),
     );
+    await bgLog('通知已发送: $title');
   } catch (e) {
-    debugPrint('bg notify failed: $e');
+    await bgLog('通知发送失败(带 icon): $e');
     // 退一步：不带 icon 再试一次（有些 ROM 对 @mipmap 形式解析不了）
     try {
       await appNotif.show(
@@ -98,6 +110,9 @@ Future<void> _notify(String title, String body,
               priority: alert ? Priority.high : Priority.low),
         ),
       );
-    } catch (_) {}
+      await bgLog('通知已发送(无 icon 兜底): $title');
+    } catch (e2) {
+      await bgLog('通知彻底发不出去: $e2');
+    }
   }
 }

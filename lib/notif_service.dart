@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'bg_download.dart';
+import 'bg_log.dart';
 
 /// 全局唯一的通知插件实例与点击处理器。
 /// 所有页面共用它，避免多个实例互相覆盖 onDidReceiveNotificationResponse 回调。
@@ -31,15 +33,42 @@ const String kChannelBanner = 'banner_v1'; // 剪贴板横幅：max
 ///
 /// 必须是**顶层函数**并带 `@pragma('vm:entry-point')`：系统在 App 没运行时
 /// 也要能找到这个入口来启动后台 isolate。
+///
+/// 这个 isolate 是全新的引擎，**既没有 Flutter binding 也没有插件注册**：
+///   · 不调 `WidgetsFlutterBinding.ensureInitialized()` → MethodChannel 直接抛
+///     “Binding has not yet been initialized”，被我自己的 catch 吞掉 = 点了没反应；
+///   · 不调 `DartPluginRegistrant.ensureInitialized()` → path_provider / gal /
+///     shared_preferences 全不可用。
+/// 每一步都写进 [bgLog]，出问题能在「测试」页看到走到哪一步。
 @pragma('vm:entry-point')
 void backgroundActionEntry(NotificationResponse response) {
-  // 后台 isolate 是全新的引擎，没有主 isolate 的插件注册；
-  // 不注册的话 path_provider / gal / shared_preferences 全部不可用。
-  DartPluginRegistrant.ensureInitialized();
   unawaited(() async {
-    if (response.actionId != 'download_bg') return;
+    await bgLog('收到后台动作: actionId=${response.actionId} '
+        'payload=${response.payload}');
+    try {
+      // ① 先把 Flutter binding 建起来（MethodChannel 的前提）
+      WidgetsFlutterBinding.ensureInitialized();
+      await bgLog('WidgetsFlutterBinding 初始化完成');
+    } catch (e) {
+      await bgLog('WidgetsFlutterBinding 初始化失败: $e');
+    }
+    try {
+      // ② 再把插件注册到这个 isolate
+      DartPluginRegistrant.ensureInitialized();
+      await bgLog('插件注册完成');
+    } catch (e) {
+      await bgLog('插件注册失败: $e');
+    }
+
+    if (response.actionId != 'download_bg') {
+      await bgLog('不是 download_bg，忽略');
+      return;
+    }
     final p = response.payload;
-    if (p == null || !p.startsWith('clip:')) return;
+    if (p == null || !p.startsWith('clip:')) {
+      await bgLog('payload 不合法: $p');
+      return;
+    }
     await runBackgroundDownload(p.substring(5));
   }());
 }
