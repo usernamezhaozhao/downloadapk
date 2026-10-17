@@ -14,6 +14,10 @@ import 'notif_service.dart';
 /// 后端健康接口（HTTP 明文，用于验证 INTERNET + 明文流量是否可用）
 const String _backendToken = 'http://8.152.206.46:5555/token';
 
+/// 主引擎上的原生控制通道（与 [main.dart] 里同一个通道名）。
+/// 用它可以让原生代码启动透明 Activity，等同于点磁贴。
+const MethodChannel _nativeControl = MethodChannel('native_control');
+
 class PermissionTestPage extends StatefulWidget {
   const PermissionTestPage({super.key});
 
@@ -32,6 +36,7 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
   String _netResult = '未测试';
   String _playResult = '未测试';
   String _bannerResult = '未测试';
+  String _proxyResult = '未测试';
   double _progress = 0;
   final List<String> _log = [];
 
@@ -156,6 +161,24 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
     _addLog('横幅自检: ok=$ok · $active${err.isEmpty ? '' : ' · $err'}');
   }
 
+  /// 与磁贴等价的触发：让原生 handler 启动透明 Activity，由它在获得焦点后
+  /// 读剪贴板。链路：native_control → ClipboardProxyActivity → clipboard_proxy
+  /// → main._onClipboardLink → 弹横幅。用来区分「磁贴没启起来」还是「后面断了」。
+  Future<void> _testProxy() async {
+    setState(() => _proxyResult = '已请求…（看顶部有没有弹横幅，或有没有 Toast）');
+    try {
+      await _nativeControl.invokeMethod<void>('startClipboardProxy');
+      _addLog('手动触发透明窗口: 已发出请求');
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() => _proxyResult =
+          '已请求（2 秒内既没弹横幅也没 Toast → 透明窗口大概被 ROM 拦了）');
+    } catch (e) {
+      setState(() => _proxyResult = '调用失败：$e');
+      _addLog('手动触发透明窗口失败: $e');
+    }
+  }
+
   Widget _permRow(_Perm p) {
     final isNormal = p.permission == null;
     return ListTile(
@@ -222,8 +245,24 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
           onPressed: () => openAppSettings(),
           child: const Text('打开本 App 的系统设置（改通知权限）'),
         ),
+        const SizedBox(height: 8),
+        const Text('四、剪贴板链路自检（磁贴点了没反应时点这个）',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 6),
+          child: Text(
+            '它和磁贴走的是同一条链路（原生 → 透明窗口 → 读剪贴板 → 弹横幅），'
+            '只是省掉了「磁贴」这一步。用来区分是磁贴没启动起来，还是后面的环节断了。',
+            style: TextStyle(fontSize: 11, color: Colors.black54),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: _testProxy,
+          child: const Text('④ 手动触发读剪贴板（等同磁贴）'),
+        ),
+        Text('结果: $_proxyResult'),
         const Divider(),
-        const Text('四、操作日志', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('五、操作日志', style: TextStyle(fontWeight: FontWeight.bold)),
         ..._log.map((e) => Text('• $e', style: const TextStyle(fontSize: 12))),
       ],
     );

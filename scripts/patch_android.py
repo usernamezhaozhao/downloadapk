@@ -348,7 +348,9 @@ class ClipboardProxyActivity : Activity() {
 # 快捷设置磁贴模板：下拉通知栏点一下 → 透明 Activity 获得焦点读剪贴板 → 弹横幅
 TILE_KT_TEMPLATE = """package __PKG__
 
+import android.app.PendingIntent
 import android.content.Intent
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.widget.Toast
@@ -373,14 +375,27 @@ class ClipboardTileService : TileService() {
     @Suppress("DEPRECATION")
     override fun onClick() {
         super.onClick()
+        val intent = Intent(this, ClipboardProxyActivity::class.java).apply {
+            putExtra("action", "read_clipboard")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         try {
-            val intent = Intent(this, ClipboardProxyActivity::class.java).apply {
-                putExtra("action", "read_clipboard")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (Build.VERSION.SDK_INT >= 34) {
+                // Android 14 起：磁贴用 Intent 直接起 Activity 会被系统拒绝，抛
+                // UnsupportedOperationException("... using an Intent is not allowed")。
+                // 官方要求改成传 PendingIntent。
+                val pending = PendingIntent.getActivity(
+                    this,
+                    0,
+                    intent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                startActivityAndCollapse(pending)
+            } else {
+                startActivityAndCollapse(intent)
             }
-            startActivityAndCollapse(intent)
         } catch (e: Exception) {
-            Toast.makeText(this, "启动失败：${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "启动失败：${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }
