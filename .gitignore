@@ -23,3 +23,7 @@ web/
 # Build artifacts
 app-debug.apk
 *.apk
+
+# Python
+__pycache__/
+*.pyc

@@ -31,6 +31,7 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
 
   String _netResult = '未测试';
   String _playResult = '未测试';
+  String _bannerResult = '未测试';
   double _progress = 0;
   final List<String> _log = [];
 
@@ -45,8 +46,6 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
     _Perm('通知 POST_NOTIFICATIONS', '弹下载进度/结果通知', Permission.notification),
     _Perm('前台服务 FOREGROUND_SERVICE', '下载时后台保活(防杀)', null),
     _Perm('跳过电池优化', '防省电策略杀进程', Permission.ignoreBatteryOptimizations),
-    _Perm('所有文件访问 MANAGE_EXTERNAL_STORAGE', '读取B站缓存目录(需系统设置授予)',
-        Permission.manageExternalStorage),
   ];
 
   @override
@@ -138,6 +137,25 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
     }
   }
 
+  /// 通知横幅自检：走与「检测到抖音链接」完全相同的通道发一条横幅，
+  /// 并把「是否发送成功 / 系统里有没有落库 / 失败原因」全部显示出来。
+  /// 这是排查「横幅从来不弹」最快的一步：能区分「没发出去」和「发出去了但被系统藏了」。
+  Future<void> _testBanner() async {
+    setState(() => _bannerResult = '发送中…');
+    final status = await Permission.notification.status;
+    final ok = await showLinkHeadsUp(
+      'https://v.douyin.com/selfcheck-demo/',
+      title: '横幅自检（示例）',
+    );
+    // 给系统一点时间落库
+    await Future.delayed(const Duration(milliseconds: 400));
+    final active = await debugActiveNotifications();
+    final err = lastNotifError == null ? '' : '\n失败原因：$lastNotifError';
+    setState(() => _bannerResult =
+        'show() 返回值：${ok ? '成功' : '失败'}\n通知权限：$status\n$active$err');
+    _addLog('横幅自检: ok=$ok · $active${err.isEmpty ? '' : ' · $err'}');
+  }
+
   Widget _permRow(_Perm p) {
     final isNormal = p.permission == null;
     return ListTile(
@@ -181,7 +199,31 @@ class _PermissionTestPageState extends State<PermissionTestPage> {
         if (_progress > 0 && _progress < 1)
           LinearProgressIndicator(value: _progress),
         const Divider(),
-        const Text('三、操作日志', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('三、通知链路自检（横幅不弹时先点这个）',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        ElevatedButton(
+          onPressed: _testBanner,
+          child: const Text('③ 发一条测试横幅（含错误回显）'),
+        ),
+        Text('结果: $_bannerResult'),
+        if (_bannerResult != '未测试')
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              '怎么读这个结果：\n'
+              '· show() 失败 → 看「失败原因」，那就是真正的 bug\n'
+              '· show() 成功但系统里 0 条 → 通知被系统拦下了（权限/厂商限制）\n'
+              '· 系统里有 N 条但你看不到 → 去通知设置把「剪贴板提醒」通道设为重要、允许横幅\n'
+              '（小米：设置 → 应用设置 → 本应用 → 通知管理 → 剪贴板提醒）',
+              style: TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+          ),
+        TextButton(
+          onPressed: () => openAppSettings(),
+          child: const Text('打开本 App 的系统设置（改通知权限）'),
+        ),
+        const Divider(),
+        const Text('四、操作日志', style: TextStyle(fontWeight: FontWeight.bold)),
         ..._log.map((e) => Text('• $e', style: const TextStyle(fontSize: 12))),
       ],
     );

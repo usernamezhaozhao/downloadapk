@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hello_world_app/bilibili_page.dart';
 import 'package:hello_world_app/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -27,13 +26,6 @@ void main() {
     );
   });
 
-  // Pure widget test: no platform channels involved at all.
-  testWidgets('BilibiliPage shows Hello Bilibili', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: BilibiliPage()));
-
-    expect(find.text('Hello Bilibili'), findsOneWidget);
-  });
-
   testWidgets('home shows three tabs: 首页 / 抖音 / 测试', (tester) async {
     await tester.pumpWidget(const MyApp());
     // Give the async init (fully mocked above, and degradable inside the
@@ -42,10 +34,11 @@ void main() {
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('首页'), findsOneWidget);
-    // 「抖音」出现两处：底部 Tab + 首页抖音/B站切换按钮
-    expect(find.text('抖音'), findsWidgets);
-    expect(find.text('B站'), findsWidgets);
+    expect(find.text('抖音'), findsOneWidget);
     expect(find.text('测试'), findsOneWidget);
+    // B站 / Shizuku 相关功能已整体移除，界面不应再出现
+    expect(find.text('B站'), findsNothing);
+    expect(find.textContaining('Shizuku'), findsNothing);
   });
 
   testWidgets('home page shows empty cache state', (tester) async {

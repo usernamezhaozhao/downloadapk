@@ -211,9 +211,11 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
         body,
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'download_channel',
-            '下载进度',
+            kChannelResult,
+            '下载结果',
+            channelDescription: '下载成功/失败与 Cookie 测试结果',
             importance: Importance.high,
+            priority: Priority.high,
           ),
         ),
         payload: payload,
@@ -444,7 +446,8 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('剪贴板自动监听'),
-                  subtitle: const Text('复制链接后回到本App自动识别（安卓10+后台读剪贴板受限）'),
+                  subtitle: const Text(
+                      '复制链接后，下拉通知栏点「抖音下载」磁贴即可（安卓10+后台读不到剪贴板）'),
                   value: _clipboardMonitor,
                   onChanged: _working
                       ? null
@@ -472,26 +475,6 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
                 Text(_status),
                 if (_progress > 0 && _progress < 1)
                   LinearProgressIndicator(value: _progress),
-              ],
-            ),
-          ),
-        ),
-        // —— B 站说明（规划中）——
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text('B 站（规划中）',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(height: 6),
-                Text(
-                  '后续将直接读取 B 站 App 的缓存路径：B 站负责下载，'
-                  '本应用读取其缓存目录，实现播放与管理，'
-                  '届时 B 站不再单独开 Tab。',
-                  style: TextStyle(fontSize: 13, color: Colors.black54),
-                ),
               ],
             ),
           ),

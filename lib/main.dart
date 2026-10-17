@@ -119,20 +119,33 @@ class _HomeTabsState extends State<HomeTabs> {
     });
   }
 
+  /// 匹配抖音链接（含 v.douyin.com 短链）
+  static final RegExp _douyinLink =
+      RegExp(r'https?://[^\s]*douyin\.com/[^\s]+', caseSensitive: false);
+
   /// 前台服务把检测到的抖音链接发回来，这里弹系统横幅（与通知点击同款体验）。
   /// 先立即显示链接，再异步解析出标题覆盖更新，让用户点击「立即下载」前
   /// 就知道即将下的是什么（点了才真正开始下载，不会自动下）。
   void _onClipboardLink(dynamic data) {
     if (data is! String || data.isEmpty || !mounted) return;
-    // 通知按钮「读取剪贴板」指令：经主引擎上的 native_control 启动透明代理 Activity，
-    // 由它在真正获得焦点后读剪贴板，再经 clipboard_proxy 通道回传真实链接。
+    // 通知按钮 / 磁贴指令：经主引擎上的 native_control 启动透明代理 Activity，
+    // 由它在真正获得焦点后读剪贴板，再经 clipboard_proxy 通道回传真实内容。
     if (data == 'read_clipboard') {
       _startClipboardProxy();
       return;
     }
-    showLinkHeadsUp(data);
-    fetchDouyinTitle(data).then((t) {
-      if (t != null && mounted) showLinkHeadsUp(data, title: t);
+    final m = _douyinLink.firstMatch(data);
+    if (m == null) {
+      // 读到了内容但不是抖音链接：明确告知，绝不再静默失败（否则就是「点了没反应」）
+      final preview = data.length > 60 ? '${data.substring(0, 60)}…' : data;
+      showHeadsUp('没识别到抖音链接',
+          '剪贴板内容是：\n$preview\n\n请在抖音里「分享 → 复制链接」后立刻点磁贴。');
+      return;
+    }
+    final link = m.group(0)!;
+    showLinkHeadsUp(link);
+    fetchDouyinTitle(link).then((t) {
+      if (t != null && mounted) showLinkHeadsUp(link, title: t);
     });
   }
 

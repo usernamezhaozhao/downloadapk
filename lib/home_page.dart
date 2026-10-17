@@ -3,16 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 
-import 'bili_cache.dart';
-import 'shizuku_bili.dart';
 import 'models.dart';
 import 'store.dart';
 import 'video_preview.dart';
 
-/// 首页：缓存下载展示（仿 B 站「离线缓存」页）。
-/// 顶部「抖音 / B站」切换：抖音为本 App 下载记录；B站直读B站客户端缓存目录。
+/// 首页：本 App 的下载缓存列表（布局仿 B 站「离线缓存」页）。
 /// 支持：搜索 / 删除 / 按作品归组（封面+标题+文件数+容量）/ 点卡片自动预览播放 / 底部容量统计。
 class HomePage extends StatefulWidget {
   /// 主页 Tab 每次切换时递增，用于返回首页时刷新缓存列表
@@ -46,19 +42,6 @@ class _HomePageState extends State<HomePage> {
   int? _freeBytes; // 设备剩余空间（df 取不到则为 null）
   String? _pendingId; // 通知点击后要自动打开预览的作品 id
 
-  // —— B站缓存 ——
-  String _source = 'douyin'; // 'douyin' | 'bili'
-  bool _biliLoading = false;
-  bool? _biliPerm; // null=未检查 / true=已授权 / false=缺「所有文件访问」
-  String? _biliError; // B站扫描失败/为空的原因（诊断用）
-  List<BiliEntry> _bili = [];
-
-  // —— Shizuku（shell 权限读 /Android/data，绕开 ROM 对 MANAGE 的限制）——
-  bool? _shizukuAvailable; // null=未探测 / true=Shizuku 在线 / false=未装或未运行
-  bool? _shizukuAuthorized; // null=未探测 / true=已授权 / false=待授权
-  bool _biliViaShizuku = false; // 当前列表是否经 Shizuku 读出
-  bool _forceManage = false; // 用户选择改用「所有文件访问」而非 Shizuku
-
   @override
   void initState() {
     super.initState();
@@ -68,10 +51,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onSignal() {
-    if (mounted) {
-      _load();
-      if (_source == 'bili') _loadBili();
-    }
+    if (mounted) _load();
   }
 
   void _onPending() {
@@ -199,132 +179,6 @@ class _HomePageState extends State<HomePage> {
     }
     await Store.instance.removeItem(g.id);
     _load();
-  }
-
-  // ———————— B站缓存（直读B站客户端目录） ————————
-
-  Future<void> _loadBili() async {
-    if (_biliLoading) return;
-    setState(() => _biliLoading = true);
-    try {
-      // 优先 Shizuku：以 shell 权限读 /Android/data（部分 ROM 对 MANAGE 仍拒）
-      if (!_forceManage) {
-        final avail = await ShizukuBili.available;
-        if (mounted) setState(() => _shizukuAvailable = avail);
-        if (avail) {
-          final auth = await ShizukuBili.authorized;
-          if (mounted) setState(() => _shizukuAuthorized = auth);
-          if (!auth) {
-            // 在线但未授权：留给界面提示去授权，不继续
-            if (mounted) setState(() => _biliLoading = false);
-            return;
-          }
-          final entries = await ShizukuBili.scan();
-          if (mounted) {
-            setState(() {
-              _bili = entries;
-              _biliViaShizuku = true;
-              _biliError = entries.isEmpty
-                  ? 'Shizuku 已读取，但没扫到任何 B站缓存'
-                  : null;
-              _biliLoading = false;
-            });
-          }
-          return;
-        }
-      }
-      // 回退：MANAGE_EXTERNAL_STORAGE 直读（需用户在系统设置授予）
-      final s = await Permission.manageExternalStorage.status;
-      if (!s.isGranted) {
-        if (mounted) {
-          setState(() {
-            _biliPerm = false;
-            _biliLoading = false;
-          });
-        }
-        return;
-      }
-      final entries = await BiliCache.scan();
-      if (mounted) {
-        setState(() {
-          _bili = entries;
-          _biliViaShizuku = false;
-          _biliPerm = true;
-          _biliError = entries.isEmpty ? BiliCache.lastError : null;
-          _biliLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _biliLoading = false;
-          _biliError = '$e';
-        });
-      }
-    }
-  }
-
-  Future<void> _requestBiliPerm() async {
-    await Permission.manageExternalStorage.request();
-    _loadBili();
-  }
-
-  Future<void> _requestShizuku() async {
-    final ok = await ShizukuBili.requestAuth();
-    if (!ok && mounted) {
-      // 授权失败（用户拒绝 / Shizuku 未运行），提示改用所有文件访问
-      setState(() => _forceManage = true);
-    }
-    _loadBili();
-  }
-
-  void _previewBili(BiliEntry e) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: e.videoPath != null
-              ? VideoPreview(e.videoPath!)
-              : const SizedBox(
-                  height: 120,
-                  child: Center(child: Text('未找到视频文件 (video.m4s)')),
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _deleteBili(BiliEntry e) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('删除B站缓存'),
-        content: Text('删除「${e.title}」？\n将删除B站客户端的这条缓存（B站内也会消失）。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('删除')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    if (_biliViaShizuku) {
-      await ShizukuBili.remove(e);
-    } else {
-      await BiliCache.remove(e);
-    }
-    _loadBili();
   }
 
   void _preview(_Group g) {
@@ -477,36 +331,9 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // —— 抖音 / B站 切换 ——
+        // —— 搜索框 ——
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-          child: SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                  value: 'douyin',
-                  label: Text('抖音'),
-                  icon: Icon(Icons.music_note, size: 18)),
-              ButtonSegment(
-                  value: 'bili',
-                  label: Text('B站'),
-                  icon: Icon(Icons.live_tv, size: 18)),
-            ],
-            selected: {_source},
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              backgroundColor: WidgetStatePropertyAll(Colors.white),
-              side: WidgetStatePropertyAll(
-                  BorderSide(color: Color(0xFFE0E0E0))),
-            ),
-            onSelectionChanged: (s) {
-              setState(() => _source = s.first);
-              if (s.first == 'bili') _loadBili();
-            },
-          ),
-        ),
-        // —— 搜索框（抖音/B站共用） ——
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: TextField(
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search),
@@ -517,9 +344,7 @@ class _HomePageState extends State<HomePage> {
             onChanged: (v) => setState(() => _query = v),
           ),
         ),
-        Expanded(
-          child: _source == 'douyin' ? _douyinBody() : _biliBody(),
-        ),
+        Expanded(child: _douyinBody()),
       ],
     );
   }
@@ -563,199 +388,5 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
               );
-  }
-
-  // —— B站：直读B站客户端离线缓存 ——
-  Widget _biliBody() {
-    if (_biliLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    // Shizuku 在线但未授权：引导授权（也可改用所有文件访问）
-    if (_shizukuAvailable == true && _shizukuAuthorized != true && !_forceManage) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.verified_user, size: 48, color: Colors.grey[400]),
-            const SizedBox(height: 12),
-            const Text(
-              '已检测到 Shizuku，但本应用尚未被授权\n'
-              '点击授权后将以 shell 权限读取 B站缓存\n'
-              '（绕开 ROM 对「所有文件访问」的限制）',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: _requestShizuku,
-              icon: const Icon(Icons.login),
-              label: const Text('授权 Shizuku'),
-            ),
-            TextButton(
-              onPressed: () {
-                setState(() => _forceManage = true);
-                _loadBili();
-              },
-              child: const Text('改用「所有文件访问」'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (_biliPerm == false) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lock_outlined,
-                size: 48, color: Colors.grey[400]),
-            const SizedBox(height: 12),
-            const Text(
-              '读取B站缓存需要「所有文件访问」权限\n'
-              '（安卓限制，/Android/data 只能这样访问）\n\n'
-              '小米路径：设置 → 应用管理 → 本应用\n→ 权限 → 文件访问 → 允许管理所有文件',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: _requestBiliPerm,
-              icon: const Icon(Icons.settings),
-              label: const Text('去授权'),
-            ),
-            TextButton(
-              onPressed: _loadBili,
-              child: const Text('我已授权，重新检测'),
-            ),
-          ],
-        ),
-      );
-    }
-    final q = _query.trim().toLowerCase();
-    final list = q.isEmpty
-        ? _bili
-        : _bili.where((e) => e.title.toLowerCase().contains(q)).toList();
-    if (list.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.tv_off_outlined, size: 48, color: Colors.grey[400]),
-            const SizedBox(height: 8),
-            Text(
-              _query.isEmpty
-                  ? '未找到B站离线缓存\n（需要B站 App 缓存过视频；路径 ${BiliCache.rootPath}）'
-                  : '没有匹配「$_query」的结果',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-            if (_query.isEmpty && _biliError != null) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  '诊断：${_biliError!}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: Colors.redAccent, fontSize: 11),
-                ),
-              ),
-              const SizedBox(height: 12),
-              ElevatedButton.icon(
-                onPressed: _loadBili,
-                icon: const Icon(Icons.refresh),
-                label: const Text('重新检测'),
-              ),
-            ],
-          ],
-        ),
-      );
-    }
-    final total = list.fold<int>(0, (s, e) => s + e.bytes);
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        for (final e in list) _biliCard(e),
-        const SizedBox(height: 8),
-        Text('B站缓存共 ${_fmt(total)}',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.grey, fontSize: 12)),
-      ],
-    );
-  }
-
-  Widget _biliCard(BiliEntry e) {
-    final img = e.cover != null
-        ? Image.network(e.cover!,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) =>
-                const Icon(Icons.video_file, size: 36))
-        : const Icon(Icons.video_file, size: 36);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _previewBili(e),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 110,
-                height: 70,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      img,
-                      Positioned(
-                        left: 4,
-                        bottom: 4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          color: Colors.black54,
-                          child: const Text('B站缓存',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 10)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      e.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      e.videoPath != null
-                          ? '${_fmt(e.bytes)} · 可预览'
-                          : '${_fmt(e.bytes)} · 未找到视频文件',
-                      style:
-                          const TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline),
-                tooltip: '删除',
-                onPressed: () => _deleteBili(e),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }

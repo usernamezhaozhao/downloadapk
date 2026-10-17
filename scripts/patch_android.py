@@ -25,9 +25,6 @@ PERMISSIONS = [
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-    # Android 11+ 访问 /Android/data/tv.danmaku.bili（B站缓存目录）需要
-    # 「所有文件访问」特殊权限（用户在系统设置手动授予）
-    "android.permission.MANAGE_EXTERNAL_STORAGE",
 ]
 
 
@@ -87,17 +84,6 @@ def patch_manifest() -> None:
             android:foregroundServiceType="dataSync" />"""
         content = content.replace("</application>", fg + "\n    </application>", 1)
 
-    # 3.6) 注入 Shizuku provider（shizuku_api 包 bind Shizuku 服务必需）
-    if "rikka.shizuku.ShizukuProvider" not in content:
-        shizuku = """        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />"""
-        content = content.replace("</application>", shizuku + "\n    </application>", 1)
-
     # 4) 注入 <queries>（Android 11+ 让系统能找到视频/图片播放器）
     if "<queries>" not in content:
         queries = """    <queries>
@@ -123,6 +109,22 @@ def patch_manifest() -> None:
             android:taskAffinity=""
             android:exported="true" />"""
         content = content.replace("</application>", proxy + "\n    </application>", 1)
+
+    # 4.6) 注入快捷设置磁贴（下拉通知栏点一下 → 读剪贴板 → 弹下载横幅）
+    #      需要用户自己在通知栏「编辑」里把它拖出来；BIND_QUICK_SETTINGS_TILE
+    #      是系统要求的绑定权限，由系统授予，不需要我们申请。
+    if "ClipboardTileService" not in content:
+        tile = """        <service
+            android:name=".ClipboardTileService"
+            android:label="抖音下载"
+            android:icon="@mipmap/ic_launcher"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>"""
+        content = content.replace("</application>", tile + "\n    </application>", 1)
 
     with open(MANIFEST, "w", encoding="utf-8") as f:
         f.write(content)
@@ -213,7 +215,11 @@ def write_file_paths() -> None:
 
 
 def patch_min_sdk() -> None:
-    """shizuku_api 要求 minSdk >= 24，flutter create 默认可能更低，提到 24。"""
+    """统一 minSdk 到 24（Android 7.0）。
+
+    Flutter 模板默认可能更低，而个别插件（通知/前台服务等）要求更高；
+    提前抬到 24 可避免构建期报 "uses-sdk:minSdkVersion ... cannot be smaller"。
+    """
     for gradle in ("android/app/build.gradle", "android/app/build.gradle.kts"):
         if not os.path.exists(gradle):
             continue
@@ -244,7 +250,7 @@ def patch_min_sdk() -> None:
                 patched = True
                 print("patched minSdk to 24 in %s" % gradle)
         else:
-            print("WARN: no minSdk in %s; shizuku_api may fail to build" % gradle)
+            print("WARN: no minSdk in %s; minSdk NOT raised" % gradle)
             continue
 
         if patched:
@@ -261,31 +267,34 @@ PROXY_KT_TEMPLATE = """package __PKG__
 import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 
-// 照 CSDN 文章：用透明 Activity 把「后台点击」转成「前台焦点」，
-// 在 onWindowFocusChanged(true) 窗口真正获得焦点时读剪贴板（后台读会抛 SecurityException）。
-// 读完即 finish，且不带主 task 焦点，用户无感知。
+// 透明 Activity：把「用户点磁贴 / 通知按钮」转成「前台焦点」，在窗口真正获得
+// 焦点后读剪贴板。Android 10+ 只有当前有焦点的应用才能读剪贴板，后台服务里
+// 读恒为 null —— 这条系统限制绕不过去，但「用户主动点一下 → 我们立刻变成前台」
+// 是系统允许的合法路径。读完 0.2~0.4 秒内 finish，用户几乎看不到界面。
 class ClipboardProxyActivity : Activity() {
-    private var pending = false
+    private var handled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pending = intent?.getStringExtra("action") == "read_clipboard"
+        if (intent?.getStringExtra("action") != "read_clipboard") {
+            finish()
+            return
+        }
+        // 部分 ROM 的透明 Activity 不回调 onWindowFocusChanged，这里多重兜底
+        window.decorView.postDelayed({ tryRead() }, 120)
+        window.decorView.postDelayed({ tryRead() }, 350)
+        window.decorView.postDelayed({ giveUp() }, 1500)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && pending) {
-            pending = false
-            val text = readClipboard()
-            if (!text.isNullOrBlank()) {
-                sendToFlutter(text)
-            }
-            finish()
-        }
+        if (hasFocus) tryRead()
     }
 
     private fun readClipboard(): String? {
@@ -297,13 +306,81 @@ class ClipboardProxyActivity : Activity() {
         }
     }
 
-    private fun sendToFlutter(text: String) {
-        val engine = FlutterEngineCache.getInstance().get("main") ?: return
-        try {
+    private fun tryRead() {
+        if (handled) return
+        val text = readClipboard()
+        if (text.isNullOrBlank()) return
+        handled = true
+        if (!sendToFlutter(text)) {
+            // Flutter 引擎已不在（App 被系统回收）：把 App 拉起来，
+            // 它回到前台时会自己再检测一次剪贴板，效果一样。
+            try {
+                startActivity(Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                })
+            } catch (e: Exception) {
+                Toast.makeText(this, "打开抖音下载器失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+        finish()
+    }
+
+    private fun giveUp() {
+        if (handled) return
+        handled = true
+        Toast.makeText(this, "剪贴板是空的：请先在抖音里「分享 → 复制链接」", Toast.LENGTH_LONG).show()
+        finish()
+    }
+
+    private fun sendToFlutter(text: String): Boolean {
+        val engine = FlutterEngineCache.getInstance().get("main") ?: return false
+        return try {
             MethodChannel(engine.dartExecutor.binaryMessenger, "clipboard_proxy")
                 .invokeMethod("onClipboard", text)
+            true
         } catch (e: Exception) {
-            // ignore
+            false
+        }
+    }
+}
+"""
+
+# 快捷设置磁贴模板：下拉通知栏点一下 → 透明 Activity 获得焦点读剪贴板 → 弹横幅
+TILE_KT_TEMPLATE = """package __PKG__
+
+import android.content.Intent
+import android.service.quicksettings.Tile
+import android.service.quicksettings.TileService
+import android.widget.Toast
+
+// 快捷设置磁贴（下拉通知栏里的图标）：用户点一下 → 启动透明 Activity 读剪贴板
+// → 回传 Flutter 弹「立即下载」横幅。不需要任何敏感权限，也不跟抖音抢：
+// 用户主动点这一下，就是一次合法、确定能成功的前台读取。
+class ClipboardTileService : TileService() {
+    override fun onStartListening() {
+        super.onStartListening()
+        try {
+            qsTile?.apply {
+                state = Tile.STATE_INACTIVE
+                label = "抖音下载"
+                updateTile()
+            }
+        } catch (e: Exception) {
+            // 部分 ROM 的 qsTile 可能为空，忽略即可
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onClick() {
+        super.onClick()
+        try {
+            val intent = Intent(this, ClipboardProxyActivity::class.java).apply {
+                putExtra("action", "read_clipboard")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivityAndCollapse(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "启动失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -343,13 +420,14 @@ class MainActivity : FlutterActivity() {
 
 
 def patch_kotlin() -> None:
-    """注入透明剪贴板代理 Activity 与原生通道（照 CSDN 文章架构）。
+    """注入剪贴板链路需要的原生代码。
 
-    - 重写 MainActivity 缓存引擎到 FlutterEngineCache("main")，并注册
+    - 重写 MainActivity：缓存引擎到 FlutterEngineCache("main")，并注册
       native_control 通道（收到 startClipboardProxy 即启动透明 Activity）。
-    - 写入 ClipboardProxyActivity.kt（透明主题，onWindowFocusChanged 读剪贴板，
-      经 clipboard_proxy 通道发回 Flutter）。
-    幂等：已存在对应内容则跳过。
+    - 写入 ClipboardProxyActivity.kt：透明主题，获得焦点后读剪贴板，
+      经 clipboard_proxy 通道发回 Flutter；读不到内容会 Toast 提示。
+    - 写入 ClipboardTileService.kt：快捷设置磁贴，点一下就走同一条链路。
+    幂等：已存在对应文件则跳过。
     """
     # 1) 提取包名（namespace 优先，fallback applicationId，再 fallback 默认）
     pkg = "com.example.hello_world_app"
@@ -398,13 +476,22 @@ def patch_kotlin() -> None:
     else:
         print("ClipboardProxyActivity.kt already exists, skip")
 
+    # 4) ClipboardTileService.kt（快捷设置磁贴：下拉通知栏点一下读剪贴板）
+    tile_kt = os.path.join(pkg_dir, "ClipboardTileService.kt")
+    if not os.path.exists(tile_kt):
+        with open(tile_kt, "w", encoding="utf-8") as f:
+            f.write(TILE_KT_TEMPLATE.replace("__PKG__", pkg))
+        print("wrote ClipboardTileService.kt")
+    else:
+        print("ClipboardTileService.kt already exists, skip")
+
 
 def patch_root_gradle() -> None:
     """统一所有 Android 子模块的 JVM 目标为 17，消除
     "Inconsistent JVM Target Compatibility" 编译失败。
 
-    shizuku_api 插件把 Kotlin 编译目标设为 17，但同模块的 Java 编译目标
-    默认仍是 11，AGP 会因此报错：
+    插件对 Kotlin/Java 目标版本要求不一致时（例如某插件把 Kotlin 编译目标
+    设为 17，而同模块 Java 目标仍是 11），AGP 会直接报错：
         compileDebugJavaWithJavac (11) 和 compileDebugKotlin (17) 不一致
     在根 build.gradle.kts 里把所有 android 子模块(含插件)的
     compileOptions 与 kotlinOptions 都拉到 17，从根本上保证一致。
@@ -424,22 +511,19 @@ def patch_root_gradle() -> None:
     block = '''
 
 // [patch] consistent JVM target 17 for all android subprojects
-// 统一所有 Android 子模块的 JVM 目标为 17，消除
-// "Inconsistent JVM Target Compatibility"（shizuku_api 的 Kotlin=17 / Java=11）。
+// 统一所有子模块的 Java/Kotlin 编译任务 JVM 目标为 17，消除
+// "Inconsistent JVM Target Compatibility"（插件 Kotlin=17 / 同模块 Java=11）。
+// 用任务级配置，避免根脚本里调用 android{} DSL 导致的 Unresolved reference。
 // CI 使用 JDK 17。
-subprojects {
-    afterEvaluate {
-        if (plugins.hasPlugin("com.android.library") || plugins.hasPlugin("com.android.application")) {
-            android {
-                compileOptions {
-                    sourceCompatibility = JavaVersion.VERSION_17
-                    targetCompatibility = JavaVersion.VERSION_17
-                }
-                kotlinOptions {
-                    jvmTarget = "17"
-                }
-            }
+allprojects {
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        kotlinOptions {
+            jvmTarget = "17"
         }
+    }
+    tasks.withType<JavaCompile>().configureEach {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 '''
@@ -456,4 +540,4 @@ if __name__ == "__main__":
     write_file_paths()
     patch_kotlin()
     patch_root_gradle()
-    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + shizuku provider + minSdk24 + clipboard proxy activity + JVM target 17")
+    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + minSdk24 + clipboard proxy activity + QS tile + JVM target 17")
