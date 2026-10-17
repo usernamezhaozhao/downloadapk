@@ -232,41 +232,103 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 缩略图：16:9、圆角 6；仅在多文件（图文/多P）时右下角显示数量角标，
+  /// 比例与排布对齐 B站「离线缓存」列表。
   Widget _thumb(_Group g) {
     Widget img;
     if (g.coverPath != null) {
       img = Image.file(File(g.coverPath!),
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
-              const Icon(Icons.video_file, size: 36));
+          errorBuilder: (_, __, ___) => _thumbPlaceholder());
     } else if (g.cover != null) {
       img = Image.network(g.cover!,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
-              const Icon(Icons.image, size: 36));
+          errorBuilder: (_, __, ___) => _thumbPlaceholder());
     } else {
-      img = const Icon(Icons.video_file, size: 36);
+      img = _thumbPlaceholder();
     }
     return SizedBox(
-      width: 110,
-      height: 70,
+      width: 138,
+      height: 78,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: Stack(
           fit: StackFit.expand,
           children: [
+            const ColoredBox(color: Color(0xFFF2F2F4)),
             img,
-            Positioned(
-              left: 4,
-              bottom: 4,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                color: Colors.black54,
-                child: Text(
-                  '${g.type == 'image' ? '图文' : '视频'} · ${g.paths.length}',
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
+            if (g.paths.length > 1)
+              Positioned(
+                right: 4,
+                bottom: 4,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.filter_none,
+                          size: 10, color: Colors.white),
+                      const SizedBox(width: 2),
+                      Text('${g.paths.length}',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 10)),
+                    ],
+                  ),
                 ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumbPlaceholder() => const ColoredBox(
+        color: Color(0xFFF2F2F4),
+        child: Center(
+          child: Icon(Icons.play_circle_outline,
+              size: 26, color: Color(0x33000000)),
+        ),
+      );
+
+  /// 列表行：左缩略图 + 右标题/容量。点开预览，**长按删除**（B站同款操作，
+  /// 列表里不再挂删除按钮，让右侧留白更干净）。
+  Widget _row(_Group g) {
+    return InkWell(
+      onTap: () => _preview(g),
+      onLongPress: () => _delete(g),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _thumb(g),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    g.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${_fmt(_groupSize(g))}'
+                    '${g.paths.length > 1 ? ' · ${g.paths.length} 个文件' : ''}',
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFF9A9AA0)),
+                  ),
+                ],
               ),
             ),
           ],
@@ -275,48 +337,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _card(_Group g) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _preview(g),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              _thumb(g),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      g.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_fmt(_groupSize(g))} · ${g.paths.length} 个文件',
-                      style:
-                          const TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline),
-                tooltip: '删除',
-                onPressed: () => _delete(g),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _listHeader() => const Padding(
+        padding: EdgeInsets.fromLTRB(12, 14, 12, 4),
+        child: Text('已缓存视频',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+      );
 
   String _fmt(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -331,17 +356,36 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // —— 搜索框 ——
+        // 搜索：浅灰圆角胶囊，弱化存在感，把视觉重心让给列表（B站离线缓存也是这个调性）
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-          child: TextField(
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: '搜索已下载的作品',
-              border: OutlineInputBorder(),
-              isDense: true,
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+          child: Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF4F4F6),
+              borderRadius: BorderRadius.circular(20),
             ),
-            onChanged: (v) => setState(() => _query = v),
+            child: Row(
+              children: [
+                const SizedBox(width: 12),
+                const Icon(Icons.search, size: 18, color: Color(0xFF9A9AA0)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      hintText: '搜索已缓存的作品',
+                      hintStyle:
+                          TextStyle(fontSize: 13, color: Color(0xFF9A9AA0)),
+                    ),
+                    style: const TextStyle(fontSize: 13),
+                    onChanged: (v) => setState(() => _query = v),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+            ),
           ),
         ),
         Expanded(child: _douyinBody()),
@@ -349,44 +393,45 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // —— 抖音：本 App 下载记录 ——
+  // —— 抖音：本 App 的下载缓存（平铺列表，无卡片/无阴影，仿 B站「离线缓存」） ——
   Widget _douyinBody() {
-    final groups = _grouped()
-        .where((g) => g.title.toLowerCase().contains(_query.trim().toLowerCase()))
-        .toList();
+    final groups = _grouped();
+    if (!_loaded) return const Center(child: CircularProgressIndicator());
+    if (groups.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.folder_off_outlined, size: 48, color: Colors.grey[400]),
+            const SizedBox(height: 8),
+            Text(
+              _query.isEmpty
+                  ? '还没有下载记录\n去「抖音」页下载第一个作品吧'
+                  : '没有匹配「$_query」的结果',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF9A9AA0), fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
     final used = groups.fold<int>(0, (s, g) => s + _groupSize(g));
-    return !_loaded
-        ? const Center(child: CircularProgressIndicator())
-        : groups.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.folder_off_outlined,
-                        size: 48, color: Colors.grey[400]),
-                    const SizedBox(height: 8),
-                    Text(
-                      _query.isEmpty
-                          ? '还没有下载记录\n去「抖音」页下载第一个作品吧'
-                          : '没有匹配「$_query」的结果',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.all(12),
-                children: [
-                  for (final g in groups) _card(g),
-                  const SizedBox(height: 8),
-                  Text(
-                    '已使用 ${_fmt(used)}'
-                    '${_freeBytes != null ? ' / 剩余 ${_fmt(_freeBytes!)}' : ''}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.grey, fontSize: 12),
-                  ),
-                ],
-              );
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _listHeader(),
+        for (final g in groups) _row(g),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            '已使用 ${_fmt(used)}'
+            '${_freeBytes != null ? '  /  剩余 ${_fmt(_freeBytes!)}' : ''}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AA0)),
+          ),
+        ),
+      ],
+    );
   }
 }

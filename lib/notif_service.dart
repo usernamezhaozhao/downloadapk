@@ -80,10 +80,14 @@ Future<bool> showHeadsUp(
           priority: Priority.max,
           // 链接较长时下拉展开显示全文
           styleInformation: BigTextStyleInformation(body),
-          // 横幅上的「立即下载」按钮，点击后自动收起通知
+          // 横幅上的「立即下载」按钮：点了自动收起通知。
+          // showsUserInterface: true 很关键——动作按钮默认走「后台广播」，
+          // App 不在前台时那个回调到不了 Dart，表现就是「点了没反应」；
+          // 置 true 后系统会直接把 App 拉到前台，走正常的通知点击回调，
+          // 于是用户能立刻看到 App 里开始下载。
           actions: const [
             AndroidNotificationAction('download_now', '立即下载',
-                cancelNotification: true),
+                cancelNotification: true, showsUserInterface: true),
           ],
         ),
       ),

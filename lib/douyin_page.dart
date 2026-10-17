@@ -61,6 +61,10 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
     _checkClipboard();
     // 用户点了剪贴板横幅 → 自动填入链接并开始下载
     widget.pendingLink?.addListener(_onPendingLink);
+    // 冷启动（App 被杀后点横幅进来）时 pendingLink 可能在 initState 之前
+    // 就被赋值了，ValueNotifier 不会补发通知，这里在首帧后补检查一次，
+    // 否则「点了立即下载没反应」的另一种成因就是这次被漏掉。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onPendingLink());
   }
 
   void _onPendingLink() {
@@ -123,12 +127,15 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
           if (t != null && mounted) showLinkHeadsUp(link, title: t);
         });
       }
-      // App 内顶部横幅（兜底，始终可见可点），直接把链接展示出来
+      // App 内顶部横幅（兜底，始终可见可点），直接把链接展示出来。
+      // floating + showCloseIcon：用户能主动点右边的 × 关掉，不用干等它自己消失。
       final short = link.length > 60 ? '${link.substring(0, 60)}…' : link;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('检测到抖音链接：$short\n是否立即下载？'),
-          duration: const Duration(seconds: 6),
+          duration: const Duration(seconds: 8),
+          behavior: SnackBarBehavior.floating,
+          showCloseIcon: true,
           action: SnackBarAction(
             label: '立即下载',
             onPressed: () {
@@ -188,6 +195,34 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
       }
     } catch (_) {
       // 服务启动失败（如权限/厂商限制）静默降级，仍可用「回到前台」检测
+    }
+  }
+
+  /// 点「立即下载」后的即时反馈：先占一条静默的进度通知（id 与下载服务一致，
+  /// 解析完成后会被真正的进度条覆盖）。这样即使 App 在后台，
+  /// 也能立刻看到「正在处理」，而不是点完一片安静。
+  Future<void> _showStarting(String link) async {
+    try {
+      await _notif.show(
+        100,
+        '正在处理链接…',
+        link.length > 60 ? '${link.substring(0, 60)}…' : link,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            kChannelProgress,
+            '下载进度',
+            channelDescription: '下载进度的常驻进度条（静默）',
+            importance: Importance.low,
+            priority: Priority.low,
+            ongoing: true,
+            onlyAlertOnce: true,
+            showProgress: true,
+            indeterminate: true,
+          ),
+        ),
+      );
+    } catch (_) {
+      // 通知不可用时静默：界面上的状态文字仍然会给反馈
     }
   }
 
@@ -263,18 +298,24 @@ class _DouyinPageState extends State<DouyinPage> with WidgetsBindingObserver {
   }
 
   Future<void> _download() async {
+    if (_working) return;
     // 为空时回退到固定测试链接（懒人一键下）
     final link = _linkCtl.text.trim().isEmpty
         ? kFixedTestLink
         : _linkCtl.text.trim();
-    await _ensurePerms();
+    // ① 先把「我收到了、正在处理」立刻显示出来。
+    //    之前点完「立即下载」到第一个网络请求返回之间是纯黑箱（1~3 秒），
+    //    用户会以为「点了没用」——现在状态栏 + 系统通知同时给反馈。
     setState(() {
       _working = true;
       _progress = 0;
-      _status = '① 解析分享链接中…';
+      _status = '⏳ 已收到，正在处理…';
       _debugLogs.clear();
       _coverUrl = null;
     });
+    await _ensurePerms();
+    await _showStarting(link);
+    setState(() => _status = '① 解析分享链接中…');
     try {
       // 1) 解析分享短链 -> 完整链接
       final url = await resolveShare(link);
