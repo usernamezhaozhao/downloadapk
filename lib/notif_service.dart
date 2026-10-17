@@ -78,9 +78,6 @@ Future<bool> showHeadsUp(
           channelDescription: '检测到抖音链接时的横幅提醒，点击立即下载',
           importance: Importance.max,
           priority: Priority.max,
-          ticker: title,
-          category: AndroidNotificationCategory.message,
-          visibility: NotificationVisibility.public,
           // 链接较长时下拉展开显示全文
           styleInformation: BigTextStyleInformation(body),
           // 横幅上的「立即下载」按钮，点击后自动收起通知
@@ -114,13 +111,16 @@ Future<bool> showLinkHeadsUp(String link, {String? title}) {
 ///   · 0 条   → show() 根本没成功（看 [lastNotifError]）
 ///   · 有 N 条 → 已经发出去了，是系统/厂商设置把它折叠或静音了
 Future<String> debugActiveNotifications() async {
+  // 用 dynamic 调用：不同版本的插件里这个 API 的签名/可用性不一致，
+  // 这样写既不会让编译失败，真不支持时也会走 catch 返回可读提示。
   try {
-    final dynamic list = await appNotif.getActiveNotifications();
+    final dynamic plugin = appNotif;
+    final dynamic list = await plugin.getActiveNotifications();
     final n = (list as List).length;
     return n == 0
         ? '系统里当前 0 条本 App 的通知（说明没发出去）'
         : '系统里当前有 $n 条本 App 的通知（已发出；看不到就是被系统折叠/静音了）';
   } catch (e) {
-    return '查询失败：$e';
+    return '查询失败（可能是插件不支持该接口）：$e';
   }
 }

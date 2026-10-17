@@ -486,51 +486,36 @@ def patch_kotlin() -> None:
         print("ClipboardTileService.kt already exists, skip")
 
 
-def patch_root_gradle() -> None:
-    """统一所有 Android 子模块的 JVM 目标为 17，消除
-    "Inconsistent JVM Target Compatibility" 编译失败。
+def patch_gradle_properties() -> None:
+    """放宽 Kotlin/Java 的 JVM 目标校验，避免「目标版本不一致」直接把构建搞挂。
 
-    插件对 Kotlin/Java 目标版本要求不一致时（例如某插件把 Kotlin 编译目标
-    设为 17，而同模块 Java 目标仍是 11），AGP 会直接报错：
-        compileDebugJavaWithJavac (11) 和 compileDebugKotlin (17) 不一致
-    在根 build.gradle.kts 里把所有 android 子模块(含插件)的
-    compileOptions 与 kotlinOptions 都拉到 17，从根本上保证一致。
-    CI 的 setup-java 已使用 JDK 17，故 17 是安全目标。
+    踩坑记录（Run #27/#28/#29 连续红的原因）：
+      · 之前为迁就 shizuku_api（它把 Kotlin 编译目标设成 17，而同模块 Java 还是 11），
+        在根 build.gradle.kts 里用 allprojects{ kotlinOptions{...} } 强改 JVM 目标。
+      · Kotlin 2.x 把 kotlinOptions / jvmTarget 标成「错误级」弃用，而且 JavaCompile
+        的 sourceCompatibility 要的是 String、不是 JavaVersion —— 于是整个构建在
+        「脚本编译」阶段就失败，连 APK 都出不来。
+      · shizuku_api 已随 B站功能一起移除，这个补丁本来就不需要了。
+    现在只把 KGP 的这条校验降级为 warning：万一以后某个插件又不一致，
+    构建会给出警告而不是直接失败；JVM 目标本身交给 Flutter 模板保持一致。
     """
-    gradle = "android/build.gradle.kts"
-    marker = "// [patch] consistent JVM target 17 for all android subprojects"
-    if not os.path.exists(gradle):
-        print("WARN: %s not found; JVM target NOT patched" % gradle)
+    path = "android/gradle.properties"
+    key = "kotlin.jvm.target.validation.mode"
+    if not os.path.exists(path):
+        print("WARN: %s not found; JVM target validation NOT patched" % path)
         return
-    with open(gradle, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         content = f.read()
-    if marker in content:
-        print("root build.gradle.kts already patched for JVM target, skip")
+    if key in content:
+        print("%s already has %s, skip" % (path, key))
         return
-
-    block = '''
-
-// [patch] consistent JVM target 17 for all android subprojects
-// 统一所有子模块的 Java/Kotlin 编译任务 JVM 目标为 17，消除
-// "Inconsistent JVM Target Compatibility"（插件 Kotlin=17 / 同模块 Java=11）。
-// 用任务级配置，避免根脚本里调用 android{} DSL 导致的 Unresolved reference。
-// CI 使用 JDK 17。
-allprojects {
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        kotlinOptions {
-            jvmTarget = "17"
-        }
-    }
-    tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-}
-'''
-    content = content.rstrip() + block
-    with open(gradle, "w", encoding="utf-8") as f:
+    if not content.endswith("\n"):
+        content += "\n"
+    content += ("# [patch] Java/Kotlin 的 JVM 目标不一致时只警告、不中断构建\n"
+                "%s=warning\n" % key)
+    with open(path, "w", encoding="utf-8") as f:
         f.write(content)
-    print("patched root build.gradle.kts: forced JVM target 17 for all android subprojects")
+    print("patched %s: %s=warning" % (path, key))
 
 
 if __name__ == "__main__":
@@ -539,5 +524,7 @@ if __name__ == "__main__":
     patch_min_sdk()
     write_file_paths()
     patch_kotlin()
-    patch_root_gradle()
-    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + coreLibraryDesugaring + minSdk24 + clipboard proxy activity + QS tile + JVM target 17")
+    patch_gradle_properties()
+    print("patched: permissions + usesCleartextTraffic + FileProvider + queries + "
+          "coreLibraryDesugaring + minSdk24 + clipboard proxy activity + QS tile + "
+          "gradle.properties(JVM validation -> warning)")
